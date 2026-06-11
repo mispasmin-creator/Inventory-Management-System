@@ -128,7 +128,7 @@ const Sidebar = () => {
       <div className="flex items-center justify-between p-5 border-b border-slate-200 bg-slate-50">
         <div className="flex items-center gap-3">
           <img
-            src="/passary.jpeg"
+            src="/logo.png"
             alt="PMMPL Logo"
             className="w-9 h-9 rounded-xl object-cover shadow-sm border border-slate-200"
           />

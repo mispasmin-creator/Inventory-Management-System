@@ -48,7 +48,7 @@ const Login = () => {
         {/* Brand Identity */}
         <div className="text-center mb-8">
           <img 
-            src="/passary.jpeg" 
+            src="/logo.png" 
             alt="PMMPL Logo" 
             className="w-14 h-14 rounded-2xl mx-auto object-cover shadow-xl shadow-indigo-500/20 mb-3 border border-indigo-400/20" 
           />
@@ -135,11 +135,11 @@ const Login = () => {
         </form>
 
         {/* Footer info / Credentials Helper */}
-        <div className="mt-8 pt-5 border-t border-slate-800 text-center">
+        {/* <div className="mt-8 pt-5 border-t border-slate-800 text-center">
           <p className="text-[10px] text-slate-500 leading-normal">
             Demo Users: Admin: <code className="text-slate-400 font-mono">admin / 123</code> | Branch: <code className="text-slate-400 font-mono">manager_main / 123</code>
           </p>
-        </div>
+        </div> */}
       </motion.div>
     </div>
   );
