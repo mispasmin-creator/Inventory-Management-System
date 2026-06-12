@@ -33,6 +33,57 @@ const normalizeItemKey = (value) =>
     .toLowerCase()
     .replace(/[^a-z0-9]/g, '');
 
+const isBlankValue = (value) =>
+  value === null || value === undefined || (typeof value === 'string' && value.trim() === '');
+
+const toFiniteNumber = (value) => {
+  if (isBlankValue(value)) return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+};
+
+const calculateOptimumStockTotal = (optimumStock, productRate) => {
+  if (isBlankValue(optimumStock) || isBlankValue(productRate)) return '';
+
+  const optimum = toFiniteNumber(optimumStock);
+  const rate = toFiniteNumber(productRate);
+  return optimum !== null && rate !== null ? optimum * rate : '';
+};
+
+const calculateStockTotal = (actualLevel, productRate) => {
+  if (isBlankValue(actualLevel) || isBlankValue(productRate) || String(actualLevel).trim() === '-') return '';
+
+  const actual = toFiniteNumber(actualLevel);
+  const rate = toFiniteNumber(productRate);
+  if (actual === null || rate === null || actual < 0) return '';
+
+  return actual * rate;
+};
+
+const roundTo = (value, decimals = 2) => {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return '';
+  const factor = 10 ** decimals;
+  return Math.round((number + Number.EPSILON) * factor) / factor;
+};
+
+const ANNUAL_CONSUMPTION_DAYS = 365;
+const DAILY_CONSUMPTION_WORKING_DAYS = 300;
+
+const getAnnualConsumptionCutoff = () => {
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - ANNUAL_CONSUMPTION_DAYS);
+  return cutoff;
+};
+
+const parseProductionDate = (row) => {
+  const rawDate = row['Date Of Production'] || row.Timestamp;
+  if (!rawDate) return null;
+
+  const date = new Date(rawDate);
+  return Number.isNaN(date.getTime()) ? null : date;
+};
+
 const productionFirmNameMap = {
   puraborder: 'Purab',
   rklorder: 'Rkl',
@@ -47,13 +98,15 @@ const normalizeProductionFirmName = (value) => {
 const buildProductionUsageMap = async () => {
   const pageSize = 1000;
   const usageMap = {};
+  const annualUsageMap = {};
+  const annualCutoff = getAnnualConsumptionCutoff();
 
   try {
     const rawMaterialColumns = Array.from({ length: 20 }, (_, index) => {
       const rawIndex = index + 1;
       return `"Raw Material Name ${rawIndex}", "Quantity Of Raw Material ${rawIndex}"`;
     }).join(', ');
-    const selectColumns = `id, "FIRM Name", ${rawMaterialColumns}`;
+    const selectColumns = `id, "Timestamp", "Date Of Production", "FIRM Name", ${rawMaterialColumns}`;
 
     for (let from = 0; ; from += pageSize) {
       const { data, error } = await productionSupabase
@@ -68,6 +121,9 @@ const buildProductionUsageMap = async () => {
         const firmKey = normalizeFirmKey(normalizeProductionFirmName(row['FIRM Name']));
         if (!firmKey) return;
 
+        const productionDate = parseProductionDate(row);
+        const isAnnualConsumption = productionDate !== null && productionDate >= annualCutoff;
+
         for (let i = 1; i <= 20; i += 1) {
           const itemKey = normalizeItemKey(row[`Raw Material Name ${i}`]);
           if (!itemKey) continue;
@@ -78,6 +134,9 @@ const buildProductionUsageMap = async () => {
 
           const key = `${firmKey}::${itemKey}`;
           usageMap[key] = (usageMap[key] || 0) + quantity;
+          if (isAnnualConsumption) {
+            annualUsageMap[key] = (annualUsageMap[key] || 0) + quantity;
+          }
         }
       });
 
@@ -87,7 +146,7 @@ const buildProductionUsageMap = async () => {
     console.warn('Supabase production usage sync failed:', error.message);
   }
 
-  return usageMap;
+  return { usageMap, annualUsageMap };
 };
 
 const buildLiftDataMaps = async () => {
@@ -150,7 +209,7 @@ const buildLiftDataMaps = async () => {
       }
     });
 
-    const productionUsageMap = await buildProductionUsageMap();
+    const { usageMap: productionUsageMap, annualUsageMap: annualProductionUsageMap } = await buildProductionUsageMap();
     Object.entries(productionUsageMap).forEach(([key, quantity]) => {
       actualQuantityMap[key] = (actualQuantityMap[key] || 0) - quantity;
     });
@@ -187,10 +246,10 @@ const buildLiftDataMaps = async () => {
       }
     });
 
-    return { actualQuantityMap, ratesMap };
+    return { actualQuantityMap, ratesMap, annualProductionUsageMap };
   } catch (error) {
     console.warn('Supabase purchase tables data sync failed:', error.message);
-    return { actualQuantityMap: {}, ratesMap: {} };
+    return { actualQuantityMap: {}, ratesMap: {}, annualProductionUsageMap: {} };
   }
 };
 
@@ -318,7 +377,7 @@ export const apiService = {
   // Inventory
   getInventory: async (branch) => {
     try {
-      const [{ data, error }, { actualQuantityMap, ratesMap }] = await Promise.all([
+      const [{ data, error }, { actualQuantityMap, ratesMap, annualProductionUsageMap }] = await Promise.all([
         supabase
           .from('inventory_master')
           .select('*')
@@ -342,24 +401,22 @@ export const apiService = {
           const rate = ratesMap[key] !== undefined ? ratesMap[key] : (item.product_rate ?? '');
           const actualLevel = actualQuantityMap[key] ?? item.actual_level ?? '';
           const optimumStock = item.optimum_stock ?? item.optimum_qty ?? '';
+          const hasProductionUsage = Object.prototype.hasOwnProperty.call(annualProductionUsageMap, key);
+          const annualConsumption = hasProductionUsage
+            ? roundTo(annualProductionUsageMap[key], 2)
+            : (item.annual_consumption ?? item.annu_con ?? '');
+          const dailyConsumption = hasProductionUsage
+            ? roundTo(Number(annualConsumption) / DAILY_CONSUMPTION_WORKING_DAYS, 2)
+            : (item.daily_consumption ?? item.d_con ?? '');
 
-          const optimumStockVal = Number(optimumStock);
-          const actualLevelVal = Number(actualLevel);
-          const numericRate = Number(rate);
-
-          const calculatedOptimumTotal = (rate !== '' && Number.isFinite(numericRate)) 
-            ? (optimumStockVal * numericRate) 
-            : (item.optimum_stock_total ?? '');
-
-          const calculatedStockTotal = (rate !== '' && Number.isFinite(numericRate)) 
-            ? (actualLevelVal * numericRate) 
-            : (item.stock_total ?? '');
+          const calculatedOptimumTotal = calculateOptimumStockTotal(optimumStock, rate);
+          const calculatedStockTotal = calculateStockTotal(actualLevel, rate);
 
           return {
             ...item,
             _originalIndex: index,
-            annu_con: item.annual_consumption ?? item.annu_con ?? '',
-            d_con: item.daily_consumption ?? item.d_con ?? '',
+            annu_con: annualConsumption,
+            d_con: dailyConsumption,
             sf: item.safety_factor ?? item.sf ?? '',
             lead_time: item.lead_time_days ?? item.lead_time ?? '',
             max_stock: item.max_stock ?? item.max_qty ?? '',
@@ -386,10 +443,14 @@ export const apiService = {
           if (aHasActualLevel !== bHasActualLevel) return aHasActualLevel ? -1 : 1;
           return a._originalIndex - b._originalIndex;
         })
-        .map(({ _originalIndex, ...item }, index) => ({
-          ...item,
-          s_no: index + 1
-        }));
+        .map((row, index) => {
+          const item = { ...row };
+          delete item._originalIndex;
+          return {
+            ...item,
+            s_no: index + 1
+          };
+        });
     } catch (e) {
       console.warn(`Supabase getInventory for ${branch} failed:`, e.message);
       return [];
@@ -448,6 +509,12 @@ export const apiService = {
   },
 
   addInventory: async (branch, item) => {
+    const itemForSave = {
+      ...item,
+      optimum_stock_total: calculateOptimumStockTotal(item.optimum_stock, item.product_rate),
+      stock_total: calculateStockTotal(item.actual_level, item.product_rate)
+    };
+
     try {
       const getTableName = (bName) => {
         const b = bName ? bName.toLowerCase().trim() : '';
@@ -461,20 +528,20 @@ export const apiService = {
       const { data, error } = await supabase
         .from(tableName)
         .insert([{
-          s_no: item.s_no !== undefined && item.s_no !== '' ? Number(item.s_no) : null,
-          item_name: item.item_name || item.itemName,
-          annu_con: item.annu_con !== undefined && item.annu_con !== '' ? Number(item.annu_con) : null,
-          d_con: item.d_con !== undefined && item.d_con !== '' ? Number(item.d_con) : null,
-          sf: item.sf !== undefined && item.sf !== '' ? Number(item.sf) : null,
-          lead_time: item.lead_time !== undefined && item.lead_time !== '' ? Number(item.lead_time) : null,
-          max_stock: item.max_stock !== undefined && item.max_stock !== '' ? Number(item.max_stock) : null,
-          optimum_stock: item.optimum_stock !== undefined && item.optimum_stock !== '' ? Number(item.optimum_stock) : null,
-          actual_level: item.actual_level !== undefined && item.actual_level !== '' ? Number(item.actual_level) : null,
-          product_rate: item.product_rate !== undefined && item.product_rate !== '' ? Number(item.product_rate) : null,
-          optimum_stock_total: item.optimum_stock_total !== undefined && item.optimum_stock_total !== '' ? Number(item.optimum_stock_total) : null,
-          stock_total: item.stock_total !== undefined && item.stock_total !== '' ? Number(item.stock_total) : null,
-          unit: item.unit,
-          colour: item.colour
+          s_no: itemForSave.s_no !== undefined && itemForSave.s_no !== '' ? Number(itemForSave.s_no) : null,
+          item_name: itemForSave.item_name || itemForSave.itemName,
+          annu_con: itemForSave.annu_con !== undefined && itemForSave.annu_con !== '' ? Number(itemForSave.annu_con) : null,
+          d_con: itemForSave.d_con !== undefined && itemForSave.d_con !== '' ? Number(itemForSave.d_con) : null,
+          sf: itemForSave.sf !== undefined && itemForSave.sf !== '' ? Number(itemForSave.sf) : null,
+          lead_time: itemForSave.lead_time !== undefined && itemForSave.lead_time !== '' ? Number(itemForSave.lead_time) : null,
+          max_stock: itemForSave.max_stock !== undefined && itemForSave.max_stock !== '' ? Number(itemForSave.max_stock) : null,
+          optimum_stock: itemForSave.optimum_stock !== undefined && itemForSave.optimum_stock !== '' ? Number(itemForSave.optimum_stock) : null,
+          actual_level: itemForSave.actual_level !== undefined && itemForSave.actual_level !== '' ? Number(itemForSave.actual_level) : null,
+          product_rate: itemForSave.product_rate !== undefined && itemForSave.product_rate !== '' ? Number(itemForSave.product_rate) : null,
+          optimum_stock_total: itemForSave.optimum_stock_total !== '' ? Number(itemForSave.optimum_stock_total) : null,
+          stock_total: itemForSave.stock_total !== '' ? Number(itemForSave.stock_total) : null,
+          unit: itemForSave.unit,
+          colour: itemForSave.colour
         }])
         .select();
 
@@ -482,11 +549,17 @@ export const apiService = {
       return { success: true, item: data[0] };
     } catch (e) {
       console.warn(`Supabase addInventory for ${branch} failed, trying mock fallback:`, e.message);
-      return mockDb.mockAddInventory(branch, item);
+      return mockDb.mockAddInventory(branch, itemForSave);
     }
   },
 
   updateInventory: async (branch, itemId, updatedFields) => {
+    const fieldsForSave = {
+      ...updatedFields,
+      optimum_stock_total: calculateOptimumStockTotal(updatedFields.optimum_stock, updatedFields.product_rate),
+      stock_total: calculateStockTotal(updatedFields.actual_level, updatedFields.product_rate)
+    };
+
     try {
       const getTableName = (bName) => {
         const b = bName ? bName.toLowerCase().trim() : '';
@@ -500,20 +573,20 @@ export const apiService = {
       const { data, error } = await supabase
         .from(tableName)
         .update({
-          s_no: updatedFields.s_no !== undefined ? (updatedFields.s_no !== '' ? Number(updatedFields.s_no) : null) : undefined,
-          item_name: updatedFields.item_name || updatedFields.itemName,
-          annu_con: updatedFields.annu_con !== undefined && updatedFields.annu_con !== '' ? Number(updatedFields.annu_con) : undefined,
-          d_con: updatedFields.d_con !== undefined && updatedFields.d_con !== '' ? Number(updatedFields.d_con) : undefined,
-          sf: updatedFields.sf !== undefined && updatedFields.sf !== '' ? Number(updatedFields.sf) : undefined,
-          lead_time: updatedFields.lead_time !== undefined && updatedFields.lead_time !== '' ? Number(updatedFields.lead_time) : undefined,
-          max_stock: updatedFields.max_stock !== undefined ? (updatedFields.max_stock !== null && updatedFields.max_stock !== '' ? Number(updatedFields.max_stock) : null) : undefined,
-          optimum_stock: updatedFields.optimum_stock !== undefined ? (updatedFields.optimum_stock !== null && updatedFields.optimum_stock !== '' ? Number(updatedFields.optimum_stock) : null) : undefined,
-          actual_level: updatedFields.actual_level !== undefined && updatedFields.actual_level !== '' ? Number(updatedFields.actual_level) : undefined,
-          product_rate: updatedFields.product_rate !== undefined && updatedFields.product_rate !== '' ? Number(updatedFields.product_rate) : undefined,
-          optimum_stock_total: updatedFields.optimum_stock_total !== undefined ? (updatedFields.optimum_stock_total !== null && updatedFields.optimum_stock_total !== '' ? Number(updatedFields.optimum_stock_total) : null) : undefined,
-          stock_total: updatedFields.stock_total !== undefined && updatedFields.stock_total !== '' ? Number(updatedFields.stock_total) : undefined,
-          unit: updatedFields.unit,
-          colour: updatedFields.colour
+          s_no: fieldsForSave.s_no !== undefined ? (fieldsForSave.s_no !== '' ? Number(fieldsForSave.s_no) : null) : undefined,
+          item_name: fieldsForSave.item_name || fieldsForSave.itemName,
+          annu_con: fieldsForSave.annu_con !== undefined && fieldsForSave.annu_con !== '' ? Number(fieldsForSave.annu_con) : undefined,
+          d_con: fieldsForSave.d_con !== undefined && fieldsForSave.d_con !== '' ? Number(fieldsForSave.d_con) : undefined,
+          sf: fieldsForSave.sf !== undefined && fieldsForSave.sf !== '' ? Number(fieldsForSave.sf) : undefined,
+          lead_time: fieldsForSave.lead_time !== undefined && fieldsForSave.lead_time !== '' ? Number(fieldsForSave.lead_time) : undefined,
+          max_stock: fieldsForSave.max_stock !== undefined ? (fieldsForSave.max_stock !== null && fieldsForSave.max_stock !== '' ? Number(fieldsForSave.max_stock) : null) : undefined,
+          optimum_stock: fieldsForSave.optimum_stock !== undefined ? (fieldsForSave.optimum_stock !== null && fieldsForSave.optimum_stock !== '' ? Number(fieldsForSave.optimum_stock) : null) : undefined,
+          actual_level: fieldsForSave.actual_level !== undefined && fieldsForSave.actual_level !== '' ? Number(fieldsForSave.actual_level) : undefined,
+          product_rate: fieldsForSave.product_rate !== undefined && fieldsForSave.product_rate !== '' ? Number(fieldsForSave.product_rate) : undefined,
+          optimum_stock_total: fieldsForSave.optimum_stock_total !== '' ? Number(fieldsForSave.optimum_stock_total) : null,
+          stock_total: fieldsForSave.stock_total !== '' ? Number(fieldsForSave.stock_total) : null,
+          unit: fieldsForSave.unit,
+          colour: fieldsForSave.colour
         })
         .eq('id', itemId)
         .select();
@@ -522,7 +595,7 @@ export const apiService = {
       return { success: true, item: data[0] };
     } catch (e) {
       console.warn(`Supabase updateInventory for ${branch} failed, trying mock fallback:`, e.message);
-      return mockDb.mockUpdateInventory(branch, itemId, updatedFields);
+      return mockDb.mockUpdateInventory(branch, itemId, fieldsForSave);
     }
   },
 

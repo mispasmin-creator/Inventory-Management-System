@@ -7,7 +7,7 @@ import { supabase } from '../services/supabaseClient';
 import Table from '../components/Table';
 import Modal from '../components/Modal';
 import GlassCard from '../components/GlassCard';
-import { useForm } from 'react-hook-form';
+import { useForm, useWatch } from 'react-hook-form';
 import { 
   Plus, 
   Edit3, 
@@ -20,6 +20,33 @@ import {
   ArrowUpRight,
   ArrowDownLeft
 } from 'lucide-react';
+
+const isBlankValue = (value) =>
+  value === null || value === undefined || (typeof value === 'string' && value.trim() === '');
+
+const toFiniteNumber = (value) => {
+  if (isBlankValue(value)) return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+};
+
+const calculateOptimumStockTotal = (optimumStock, productRate) => {
+  if (isBlankValue(optimumStock) || isBlankValue(productRate)) return '';
+
+  const optimum = toFiniteNumber(optimumStock);
+  const rate = toFiniteNumber(productRate);
+  return optimum !== null && rate !== null ? optimum * rate : '';
+};
+
+const calculateStockTotal = (actualLevel, productRate) => {
+  if (isBlankValue(actualLevel) || isBlankValue(productRate) || String(actualLevel).trim() === '-') return '';
+
+  const actual = toFiniteNumber(actualLevel);
+  const rate = toFiniteNumber(productRate);
+  if (actual === null || rate === null || actual < 0) return '';
+
+  return actual * rate;
+};
 
 const BranchInventory = () => {
   const { branchName: routeBranchName } = useParams();
@@ -51,8 +78,8 @@ const BranchInventory = () => {
   const [transfersLoading, setTransfersLoading] = useState(false);
 
   // Forms
-  const { register: regAdd, handleSubmit: handleAddSubmit, reset: resetAdd, formState: { errors: errorsAdd } } = useForm();
-  const { register: regEdit, handleSubmit: handleEditSubmit, reset: resetEdit, setValue: setEditValue, formState: { errors: errorsEdit } } = useForm();
+  const { register: regAdd, handleSubmit: handleAddSubmit, reset: resetAdd, control: addControl, setValue: setAddValue, formState: { errors: errorsAdd } } = useForm();
+  const { register: regEdit, handleSubmit: handleEditSubmit, reset: resetEdit, control: editControl, setValue: setEditValue, formState: { errors: errorsEdit } } = useForm();
   const { register: regTrans, handleSubmit: handleTransSubmit, reset: resetTrans, formState: { errors: errorsTrans } } = useForm();
 
   const branchOptions = ['Purab', 'Pmmpl', 'Rkl'];
@@ -103,6 +130,23 @@ const BranchInventory = () => {
       supabase.removeChannel(channel);
     };
   }, [activeBranch, type, canReadActiveBranch, fetchInventory]);
+
+  const addOptimumStock = useWatch({ control: addControl, name: 'optimum_stock' });
+  const addActualLevel = useWatch({ control: addControl, name: 'actual_level' });
+  const addProductRate = useWatch({ control: addControl, name: 'product_rate' });
+  const editOptimumStock = useWatch({ control: editControl, name: 'optimum_stock' });
+  const editActualLevel = useWatch({ control: editControl, name: 'actual_level' });
+  const editProductRate = useWatch({ control: editControl, name: 'product_rate' });
+
+  useEffect(() => {
+    setAddValue('optimum_stock_total', calculateOptimumStockTotal(addOptimumStock, addProductRate));
+    setAddValue('stock_total', calculateStockTotal(addActualLevel, addProductRate));
+  }, [addOptimumStock, addActualLevel, addProductRate, setAddValue]);
+
+  useEffect(() => {
+    setEditValue('optimum_stock_total', calculateOptimumStockTotal(editOptimumStock, editProductRate));
+    setEditValue('stock_total', calculateStockTotal(editActualLevel, editProductRate));
+  }, [editOptimumStock, editActualLevel, editProductRate, setEditValue]);
 
   const fetchTransfers = async () => {
     setTransfersLoading(true);
@@ -647,8 +691,9 @@ const BranchInventory = () => {
                 type="number"
                 step="any"
                 placeholder="0"
+                readOnly
                 {...regAdd('optimum_stock_total')}
-                className="w-full px-3 py-2 text-xs rounded-lg glass-input"
+                className="w-full px-3 py-2 text-xs rounded-lg glass-input cursor-not-allowed opacity-80"
               />
             </div>
 
@@ -658,8 +703,9 @@ const BranchInventory = () => {
                 type="number"
                 step="any"
                 placeholder="0"
+                readOnly
                 {...regAdd('stock_total')}
-                className="w-full px-3 py-2 text-xs rounded-lg glass-input"
+                className="w-full px-3 py-2 text-xs rounded-lg glass-input cursor-not-allowed opacity-80"
               />
             </div>
 
@@ -829,8 +875,9 @@ const BranchInventory = () => {
                 type="number"
                 step="any"
                 placeholder="0"
+                readOnly
                 {...regEdit('optimum_stock_total')}
-                className="w-full px-3 py-2 text-xs rounded-lg glass-input"
+                className="w-full px-3 py-2 text-xs rounded-lg glass-input cursor-not-allowed opacity-80"
               />
             </div>
 
@@ -840,8 +887,9 @@ const BranchInventory = () => {
                 type="number"
                 step="any"
                 placeholder="0"
+                readOnly
                 {...regEdit('stock_total')}
-                className="w-full px-3 py-2 text-xs rounded-lg glass-input"
+                className="w-full px-3 py-2 text-xs rounded-lg glass-input cursor-not-allowed opacity-80"
               />
             </div>
 
