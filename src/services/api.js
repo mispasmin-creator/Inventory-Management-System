@@ -195,6 +195,112 @@ const buildProductionUsageMap = async () => {
   return { usageMap, annualUsageMap };
 };
 
+const buildSemiFinishedActualLevelMap = async () => {
+  const pageSize = 1000;
+  const productionFirmMap = new Map();
+  const semiAdjustmentMap = {};
+
+  try {
+    for (let from = 0; ; from += pageSize) {
+      const { data, error } = await productionSupabase
+        .from('semi_production')
+        .select('id, "SF-Sr No.", "Firm name"')
+        .range(from, from + pageSize - 1);
+
+      if (error) throw error;
+
+      (data || []).forEach((row) => {
+        if (row['SF-Sr No.']) {
+          productionFirmMap.set(row['SF-Sr No.'], row['Firm name']);
+        }
+      });
+
+      if (!data || data.length < pageSize) break;
+    }
+
+    for (let from = 0; ; from += pageSize) {
+      const { data, error } = await productionSupabase
+        .from('semi_actual')
+        .select('id, "S No.", "Semi Finished Production No.", "Product Name", "Qty Of Semi Finished Good"')
+        .range(from, from + pageSize - 1);
+
+      if (error) throw error;
+
+      (data || []).forEach((row) => {
+        const serialNumber = row['S No.'];
+        if (!serialNumber || !String(serialNumber).startsWith('SA-')) return;
+
+        const productName = row['Product Name'];
+        const productKey = normalizeItemKey(productName);
+        const firmKey = normalizeFirmKey(normalizeProductionFirmName(productionFirmMap.get(row['Semi Finished Production No.'])));
+        const rawQuantity = row['Qty Of Semi Finished Good'];
+        const quantity = Number(rawQuantity);
+        if (!firmKey || !productKey || rawQuantity === null || rawQuantity === '' || !Number.isFinite(quantity)) return;
+
+        const productText = String(productName || '').toLowerCase();
+        const signedQuantity = productText.includes('grains')
+          ? quantity
+          : productText.includes('fines')
+            ? -quantity
+            : 0;
+        if (signedQuantity === 0) return;
+
+        const key = `${firmKey}::${productKey}`;
+        semiAdjustmentMap[key] = (semiAdjustmentMap[key] || 0) + signedQuantity;
+      });
+
+      if (!data || data.length < pageSize) break;
+    }
+  } catch (error) {
+    console.warn('Supabase semi finished actual sync failed:', error.message);
+  }
+
+  return semiAdjustmentMap;
+};
+
+const buildCrushingActualLevelMap = async () => {
+  const pageSize = 1000;
+  const crushingAdjustmentMap = {};
+
+  try {
+    for (let from = 0; ; from += pageSize) {
+      const { data, error } = await productionSupabase
+        .from('crushing_actual')
+        .select('id, "Firm Name", "Crushing Product Name", "Qty Of Crushing Product"')
+        .order('id', { ascending: false })
+        .range(from, from + pageSize - 1);
+
+      if (error) throw error;
+
+      (data || []).forEach((row) => {
+        const firmKey = normalizeFirmKey(normalizeProductionFirmName(row['Firm Name']));
+        const productName = row['Crushing Product Name'];
+        const productKey = normalizeItemKey(productName);
+        const rawQuantity = row['Qty Of Crushing Product'];
+        const quantity = Number(rawQuantity);
+        if (!firmKey || !productKey || rawQuantity === null || rawQuantity === '' || !Number.isFinite(quantity)) return;
+
+        const productText = String(productName || '').toLowerCase();
+        const signedQuantity = productText.includes('grains') || productText.includes('fines')
+          ? quantity
+          : productText.includes('lumps') || productText.includes('fired')
+            ? -quantity
+            : 0;
+        if (signedQuantity === 0) return;
+
+        const key = `${firmKey}::${productKey}`;
+        crushingAdjustmentMap[key] = (crushingAdjustmentMap[key] || 0) + signedQuantity;
+      });
+
+      if (!data || data.length < pageSize) break;
+    }
+  } catch (error) {
+    console.warn('Supabase crushing actual sync failed:', error.message);
+  }
+
+  return crushingAdjustmentMap;
+};
+
 const buildFinishedGoodProductionMap = async () => {
   const pageSize = 1000;
   const productionMap = {};
@@ -530,9 +636,23 @@ const buildLiftDataMaps = async () => {
       }
     });
 
-    const { usageMap: productionUsageMap, annualUsageMap: annualProductionUsageMap } = await buildProductionUsageMap();
+    const [
+      { usageMap: productionUsageMap, annualUsageMap: annualProductionUsageMap },
+      semiFinishedAdjustmentMap,
+      crushingAdjustmentMap
+    ] = await Promise.all([
+      buildProductionUsageMap(),
+      buildSemiFinishedActualLevelMap(),
+      buildCrushingActualLevelMap()
+    ]);
     Object.entries(productionUsageMap).forEach(([key, quantity]) => {
       actualQuantityMap[key] = (actualQuantityMap[key] || 0) - quantity;
+    });
+    Object.entries(semiFinishedAdjustmentMap).forEach(([key, quantity]) => {
+      actualQuantityMap[key] = (actualQuantityMap[key] || 0) + quantity;
+    });
+    Object.entries(crushingAdjustmentMap).forEach(([key, quantity]) => {
+      actualQuantityMap[key] = (actualQuantityMap[key] || 0) + quantity;
     });
 
     // Process INDENT-PO
