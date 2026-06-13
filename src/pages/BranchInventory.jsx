@@ -7,9 +7,9 @@ import { supabase } from '../services/supabaseClient';
 import Table from '../components/Table';
 import Modal from '../components/Modal';
 import GlassCard from '../components/GlassCard';
+import { useToast } from '../components/Toast';
 import { useForm, useWatch } from 'react-hook-form';
 import { 
-  Plus, 
   Edit3, 
   Trash2, 
   ArrowRightLeft, 
@@ -63,6 +63,7 @@ const BranchInventory = () => {
     approveTransfer, 
     rejectTransfer 
   } = useInventory();
+  const { showError } = useToast();
 
   // Tab control
   const [activeTab, setActiveTab] = useState('inventory'); // 'inventory' | 'transfers'
@@ -76,6 +77,7 @@ const BranchInventory = () => {
   // Transfers logs
   const [transferRequests, setTransferRequests] = useState([]);
   const [transfersLoading, setTransfersLoading] = useState(false);
+  const [rawFactoryEntries, setRawFactoryEntries] = useState([]);
 
   // Forms
   const { register: regAdd, handleSubmit: handleAddSubmit, reset: resetAdd, control: addControl, setValue: setAddValue, formState: { errors: errorsAdd } } = useForm();
@@ -131,6 +133,11 @@ const BranchInventory = () => {
     };
   }, [activeBranch, type, canReadActiveBranch, fetchInventory]);
 
+  useEffect(() => {
+    if (type !== 'raw_material') return;
+    fetchRawFactoryEntries();
+  }, [type]);
+
   const addOptimumStock = useWatch({ control: addControl, name: 'optimum_stock' });
   const addActualLevel = useWatch({ control: addControl, name: 'actual_level' });
   const addProductRate = useWatch({ control: addControl, name: 'product_rate' });
@@ -162,6 +169,19 @@ const BranchInventory = () => {
       console.error('Failed to load transfers:', e);
     } finally {
       setTransfersLoading(false);
+    }
+  };
+
+  const fetchRawFactoryEntries = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('stock_adjustment')
+        .select('firm_name, item_name, qty, status, material_type');
+
+      if (error) throw error;
+      setRawFactoryEntries(data || []);
+    } catch (e) {
+      showError(e.message || 'Failed to load raw material factory entries.');
     }
   };
 
@@ -276,57 +296,21 @@ const BranchInventory = () => {
   };
 
   // ── Finish Good Columns (per-branch) ─────────────────────────────────────
-  const finishGoodColumnsRkl = [
-    { header: 'S. No.', accessor: 'sn', render: (row) => row.sn !== null && row.sn !== undefined ? Math.round(row.sn) : '-' },
-    // { header: 'Created At', accessor: 'created_at', render: (row) => new Date(row.created_at).toLocaleDateString() },
-    { header: 'Product Name', accessor: 'product_name' },
-    { header: 'Opening (23/11/23)', accessor: 'opening_23_11_23', render: (row) => row.opening_23_11_23 != null ? row.opening_23_11_23.toLocaleString() : '-' },
-    { header: 'Order Pending', accessor: 'order_pending', render: (row) => row.order_pending != null ? row.order_pending.toLocaleString() : '-' },
-    { header: 'Purchase Material Received', accessor: 'purchase_material_received', render: (row) => row.purchase_material_received != null ? row.purchase_material_received.toLocaleString() : '-' },
-    { header: 'Lift Material', accessor: 'lift_material', render: (row) => row.lift_material != null ? row.lift_material.toLocaleString() : '-' },
-    { header: 'In Transit', accessor: 'in_transit', render: (row) => row.in_transit != null ? row.in_transit.toLocaleString() : '-' },
-    { header: 'Purchase Return', accessor: 'purchase_return', render: (row) => row.purchase_return != null ? row.purchase_return.toLocaleString() : '-' },
-    { header: 'Production / Stock Add (Semi Made)', accessor: 'production_stock_add_semi_made', render: (row) => row.production_stock_add_semi_made != null ? row.production_stock_add_semi_made.toLocaleString() : '-' },
-    { header: 'Sales', accessor: 'sales', render: (row) => row.sales != null ? row.sales.toLocaleString() : '-' },
-    { header: 'Sales Return', accessor: 'sales_return', render: (row) => row.sales_return != null ? row.sales_return.toLocaleString() : '-' },
-    { header: 'Consumption / Stock Less / Stock Trans', accessor: 'consumption_stock_less_stock_trans', render: (row) => row.consumption_stock_less_stock_trans != null ? row.consumption_stock_less_stock_trans.toLocaleString() : '-' },
-    { header: 'Current Level', accessor: 'current_level', render: (row) => row.current_level != null ? row.current_level.toLocaleString() : '-' },
-  ];
+  const renderFinishGoodNumber = (value) => value !== null && value !== undefined && value !== '' ? Number(value).toLocaleString() : '-';
 
-  const finishGoodColumnsPmmpl = [
-    { header: 'S. No.', accessor: 's_no', render: (row) => row.s_no !== null && row.s_no !== undefined ? Math.round(row.s_no) : '-' },
-    // { header: 'Created At', accessor: 'created_at', render: (row) => new Date(row.created_at).toLocaleDateString() },
+  const finishGoodColumns = [
+    { header: 'ID', accessor: 'id' },
+    { header: 'Firm Name', accessor: 'firm_name' },
     { header: 'Product Name', accessor: 'product_name' },
-    { header: 'Opening (17/1/23)', accessor: 'opening_17_1_23', render: (row) => row.opening_17_1_23 != null ? row.opening_17_1_23.toLocaleString() : '-' },
-    { header: 'Adjustment', accessor: 'adjustment', render: (row) => row.adjustment != null ? row.adjustment.toLocaleString() : '-' },
-    { header: 'Sales Order Pending', accessor: 'sales_order_pending', render: (row) => row.sales_order_pending != null ? row.sales_order_pending.toLocaleString() : '-' },
-    { header: 'Purchase Material Received', accessor: 'purchase_material_received', render: (row) => row.purchase_material_received != null ? row.purchase_material_received.toLocaleString() : '-' },
-    { header: 'Lift Material', accessor: 'lift_material', render: (row) => row.lift_material != null ? row.lift_material.toLocaleString() : '-' },
-    { header: 'In Transit', accessor: 'in_transit', render: (row) => row.in_transit != null ? row.in_transit.toLocaleString() : '-' },
-    { header: 'Purchase Return', accessor: 'purchase_return', render: (row) => row.purchase_return != null ? row.purchase_return.toLocaleString() : '-' },
-    { header: 'Production', accessor: 'production', render: (row) => row.production != null ? row.production.toLocaleString() : '-' },
-    { header: 'Sales', accessor: 'sales', render: (row) => row.sales != null ? row.sales.toLocaleString() : '-' },
-    { header: 'Sales Return', accessor: 'sales_return', render: (row) => row.sales_return != null ? row.sales_return.toLocaleString() : '-' },
-    { header: 'Consumption', accessor: 'consumption', render: (row) => row.consumption != null ? row.consumption.toLocaleString() : '-' },
-    { header: 'Current Level', accessor: 'current_level', render: (row) => row.current_level != null ? row.current_level.toLocaleString() : '-' },
-  ];
-
-  const finishGoodColumnsPurab = [
-    { header: 'S. No.', accessor: 's_no', render: (row) => row.s_no !== null && row.s_no !== undefined ? Math.round(row.s_no) : '-' },
-    // { header: 'Created At', accessor: 'created_at', render: (row) => new Date(row.created_at).toLocaleDateString() },
-    { header: 'Product Name', accessor: 'product_name' },
-    { header: 'Op. Stock', accessor: 'op_stock_05_07_2025', render: (row) => row.op_stock_05_07_2025 != null ? row.op_stock_05_07_2025.toLocaleString() : '-' },
-    { header: 'Stock Adjustment', accessor: 'stock_adjustment', render: (row) => row.stock_adjustment != null ? row.stock_adjustment.toLocaleString() : '-' },
-    { header: 'Sales Order Pending', accessor: 'sales_order_pending', render: (row) => row.sales_order_pending != null ? row.sales_order_pending.toLocaleString() : '-' },
-    { header: 'Purchase Material Received', accessor: 'purchase_material_received', render: (row) => row.purchase_material_received != null ? row.purchase_material_received.toLocaleString() : '-' },
-    { header: 'Lift Material', accessor: 'lift_material', render: (row) => row.lift_material != null ? row.lift_material.toLocaleString() : '-' },
-    { header: 'In Transit', accessor: 'in_transit', render: (row) => row.in_transit != null ? row.in_transit.toLocaleString() : '-' },
-    { header: 'Purchase Return', accessor: 'purchase_return', render: (row) => row.purchase_return != null ? row.purchase_return.toLocaleString() : '-' },
-    { header: 'Production', accessor: 'production', render: (row) => row.production != null ? row.production.toLocaleString() : '-' },
-    { header: 'Sales', accessor: 'sales', render: (row) => row.sales != null ? row.sales.toLocaleString() : '-' },
-    { header: 'Sales Return', accessor: 'sales_return', render: (row) => row.sales_return != null ? row.sales_return.toLocaleString() : '-' },
-    { header: 'Consumption', accessor: 'consumption', render: (row) => row.consumption != null ? row.consumption.toLocaleString() : '-' },
-    { header: 'Current Level', accessor: 'current_level', render: (row) => row.current_level != null ? row.current_level.toLocaleString() : '-' },
+    { header: 'Op. Stock', accessor: 'op_stock', render: (row) => renderFinishGoodNumber(row.op_stock) },
+    { header: 'Stock Adjustment', accessor: 'stock_adjustment', render: (row) => renderFinishGoodNumber(row.stock_adjustment) },
+    { header: 'Sales Order Pending', accessor: 'sales_order_pending', render: (row) => renderFinishGoodNumber(row.sales_order_pending) },
+    { header: 'Purchase Material Received', accessor: 'purchase_material_received', render: (row) => renderFinishGoodNumber(row.purchase_material_received) },
+    { header: 'Production', accessor: 'production', render: (row) => renderFinishGoodNumber(row.production) },
+    { header: 'Sales', accessor: 'sales', render: (row) => renderFinishGoodNumber(row.sales) },
+    { header: 'Sales Return', accessor: 'sales_return', render: (row) => renderFinishGoodNumber(row.sales_return) },
+    { header: 'Consumption', accessor: 'consumption', render: (row) => renderFinishGoodNumber(row.consumption) },
+    { header: 'Current Level', accessor: 'current_level', render: (row) => renderFinishGoodNumber(row.current_level) },
   ];
 
   const renderRawNumber = (value) => value !== null && value !== undefined && value !== '' ? Number(value).toLocaleString() : '';
@@ -386,8 +370,27 @@ const BranchInventory = () => {
   // Process data to compute status for each row
   const processedInventoryItems = React.useMemo(() => {
     if (type !== 'raw_material') return inventoryItems;
+    const rawAdjustments = rawFactoryEntries.filter(entry => !entry.material_type || entry.material_type === 'raw_material');
+    const adjustmentByItem = rawAdjustments.reduce((acc, entry) => {
+      const firmKey = entry.firm_name?.trim().toLowerCase() || '*';
+      const itemKey = entry.item_name?.trim().toLowerCase();
+      if (!itemKey) return acc;
+
+      const qty = Number(entry.qty || 0);
+      const key = `${firmKey}::${itemKey}`;
+      acc[key] = (acc[key] || 0) + (entry.status === 'Factory -' ? -qty : qty);
+      return acc;
+    }, {});
+
     return inventoryItems.map(item => {
-      const actual = item.actual_level != null ? Number(item.actual_level) : null;
+      const firmKey = item.firm_name?.trim().toLowerCase();
+      const itemKey = item.item_name?.trim().toLowerCase();
+      const firmAdjustment = adjustmentByItem[`${firmKey}::${itemKey}`] || 0;
+      const legacyAdjustment = adjustmentByItem[`*::${itemKey}`] || 0;
+      const adjustedActualLevel = item.actual_level != null
+        ? Number(item.actual_level) + firmAdjustment + legacyAdjustment
+        : item.actual_level;
+      const actual = adjustedActualLevel != null ? Number(adjustedActualLevel) : null;
       const optimum = item.optimum_stock != null ? Number(item.optimum_stock) : null;
       const max = item.max_stock != null ? Number(item.max_stock) : null;
 
@@ -406,19 +409,14 @@ const BranchInventory = () => {
 
       return {
         ...item,
+        actual_level: adjustedActualLevel,
         colour: status
       };
     });
-  }, [inventoryItems, type]);
+  }, [inventoryItems, rawFactoryEntries, type]);
 
   // Pick correct column set
-  const inventoryColumns = isFinishGood
-    ? activeBranch?.toLowerCase() === 'rkl'
-      ? finishGoodColumnsRkl
-      : activeBranch?.toLowerCase() === 'pmmpl' || activeBranch?.toLowerCase() === 'madhya'
-        ? finishGoodColumnsPmmpl
-        : finishGoodColumnsPurab
-    : rawMaterialColumns;
+  const inventoryColumns = isFinishGood ? finishGoodColumns : rawMaterialColumns;
 
   // Transfer Requests Table Columns
   const transferColumns = [

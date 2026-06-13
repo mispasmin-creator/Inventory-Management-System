@@ -1,7 +1,7 @@
 // API Service Layer with Google Apps Script & Mock Fallback
 import axios from 'axios';
 import * as mockDb from './mockData';
-import { productionSupabase, purchaseSupabase, supabase } from './supabaseClient';
+import { orderSupabase, productionSupabase, purchaseSupabase, supabase } from './supabaseClient';
 
 const APPS_SCRIPT_URL = import.meta.env.VITE_APPS_SCRIPT_URL || '';
 
@@ -67,6 +67,41 @@ const roundTo = (value, decimals = 2) => {
   return Math.round((number + Number.EPSILON) * factor) / factor;
 };
 
+const hasFiniteNumber = (value) => value !== null && value !== undefined && value !== '' && Number.isFinite(Number(value));
+
+const numberOrZero = (value) => (hasFiniteNumber(value) ? Number(value) : 0);
+
+const calculateFinishedGoodCurrentLevel = (item) => {
+  if (hasFiniteNumber(item.current_level)) return Number(item.current_level);
+
+  const fields = [
+    'op_stock',
+    'stock_adjustment',
+    'purchase_material_received',
+    'lift_material',
+    'in_transit',
+    'purchase_return',
+    'production',
+    'sales',
+    'sales_return',
+    'consumption'
+  ];
+
+  const hasAnyValue = fields.some((field) => hasFiniteNumber(item[field]));
+  if (!hasAnyValue) return item.current_level;
+
+  return numberOrZero(item.op_stock)
+    + numberOrZero(item.stock_adjustment)
+    + numberOrZero(item.purchase_material_received)
+    + numberOrZero(item.lift_material)
+    + numberOrZero(item.in_transit)
+    + numberOrZero(item.production)
+    + numberOrZero(item.sales_return)
+    - numberOrZero(item.purchase_return)
+    - numberOrZero(item.sales)
+    - numberOrZero(item.consumption);
+};
+
 const ANNUAL_CONSUMPTION_DAYS = 365;
 const DAILY_CONSUMPTION_WORKING_DAYS = 300;
 
@@ -93,6 +128,17 @@ const productionFirmNameMap = {
 const normalizeProductionFirmName = (value) => {
   const firmKey = normalizeItemKey(value);
   return productionFirmNameMap[firmKey] || value;
+};
+
+const orderFirmNameMap = {
+  puraborder: 'Purab',
+  rklorder: 'Rkl',
+  pmmplorder: 'Pmmpl'
+};
+
+const normalizeOrderFirmName = (value) => {
+  const firmKey = normalizeItemKey(value);
+  return orderFirmNameMap[firmKey] || value;
 };
 
 const buildProductionUsageMap = async () => {
@@ -147,6 +193,281 @@ const buildProductionUsageMap = async () => {
   }
 
   return { usageMap, annualUsageMap };
+};
+
+const buildFinishedGoodProductionMap = async () => {
+  const pageSize = 1000;
+  const productionMap = {};
+
+  try {
+    for (let from = 0; ; from += pageSize) {
+      const { data, error } = await productionSupabase
+        .from('actual_production')
+        .select('id, "FIRM Name", "Product Name", "Quantity Of FG", "Timestamp", "Job Card No."')
+        .order('id', { ascending: false })
+        .range(from, from + pageSize - 1);
+
+      if (error) throw error;
+
+      (data || []).forEach((row) => {
+        const firmKey = normalizeFirmKey(normalizeProductionFirmName(row['FIRM Name']));
+        const productKey = normalizeItemKey(row['Product Name']);
+        const rawQuantity = row['Quantity Of FG'];
+        const quantity = Number(rawQuantity);
+
+        if (!firmKey || !productKey || rawQuantity === null || rawQuantity === '' || !Number.isFinite(quantity)) return;
+
+        const key = `${firmKey}::${productKey}`;
+        productionMap[key] = (productionMap[key] || 0) + quantity;
+      });
+
+      if (!data || data.length < pageSize) break;
+    }
+  } catch (error) {
+    console.warn('Supabase finished good production sync failed:', error.message);
+  }
+
+  return productionMap;
+};
+
+const buildFinishedGoodDispatchMap = async () => {
+  const pageSize = 1000;
+  const orderMap = new Map();
+  const dispatchMap = {};
+
+  try {
+    for (let from = 0; ; from += pageSize) {
+      const { data, error } = await orderSupabase
+        .from('ORDER RECEIPT')
+        .select('id, "Firm Name", "Product Name"')
+        .range(from, from + pageSize - 1);
+
+      if (error) throw error;
+
+      (data || []).forEach((row) => {
+        orderMap.set(row.id, row);
+      });
+
+      if (!data || data.length < pageSize) break;
+    }
+
+    for (let from = 0; ; from += pageSize) {
+      const { data, error } = await orderSupabase
+        .from('DISPATCH')
+        .select('id, po_id, "Product Name", "Qty To Be Dispatched", "Actual Truck Qty", "Fullkitting Actual", "Fullkitting Status", "Actual4"')
+        .not('Actual4', 'is', null)
+        .range(from, from + pageSize - 1);
+
+      if (error) throw error;
+
+      (data || []).forEach((row) => {
+        const fullkittingAt = row['Fullkitting Actual'] || '';
+        if (!fullkittingAt || String(fullkittingAt).trim() === '') return;
+
+        const po = row.po_id ? orderMap.get(row.po_id) || {} : {};
+        const firmKey = normalizeFirmKey(normalizeOrderFirmName(po['Firm Name']));
+        const productKey = normalizeItemKey(row['Product Name'] || po['Product Name']);
+        if (!firmKey || !productKey) return;
+
+        const truckQty = Number(row['Actual Truck Qty']) || Number(row['Qty To Be Dispatched']) || 0;
+        const key = `${firmKey}::${productKey}`;
+        dispatchMap[key] = (dispatchMap[key] || 0) + truckQty;
+      });
+
+      if (!data || data.length < pageSize) break;
+    }
+  } catch (error) {
+    console.warn('Supabase finished good dispatch sync failed:', error.message);
+  }
+
+  return dispatchMap;
+};
+
+const getOrderPendingQty = (order) => {
+  const totalQty = Number(order.Quantity) || 0;
+  const deliveredQty = Number(order.Delivered) || 0;
+
+  if (order['Pending Qty'] !== null && order['Pending Qty'] !== undefined && String(order['Pending Qty']).trim() !== '') {
+    return Math.max(0, Number(order['Pending Qty']));
+  }
+
+  return Math.max(0, totalQty - deliveredQty);
+};
+
+const buildFinishedGoodPendingOrderMap = async () => {
+  const pageSize = 1000;
+  const orderRows = [];
+  const pendingMap = {};
+
+  try {
+    for (let from = 0; ; from += pageSize) {
+      const { data, error } = await orderSupabase
+        .from('ORDER RECEIPT')
+        .select('id, "PARTY PO NO (As Per Po Exact)", "Firm Name", "Product Name", "Quantity", "Delivered", "Pending Qty", "Actual 2", logistics_status')
+        .order('id', { ascending: false })
+        .range(from, from + pageSize - 1);
+
+      if (error) throw error;
+      orderRows.push(...(data || []));
+      if (!data || data.length < pageSize) break;
+    }
+
+    const poGroups = {};
+    orderRows.forEach((order) => {
+      const poKey = order['PARTY PO NO (As Per Po Exact)'] || `__no_po_${order.id}`;
+      if (!poGroups[poKey]) {
+        poGroups[poKey] = [];
+      }
+      poGroups[poKey].push(order);
+    });
+
+    Object.values(poGroups).forEach((ordersInPO) => {
+      const isCancelled = ordersInPO.some(order => order.logistics_status === 'Order Cancelled');
+      if (isCancelled) return;
+
+      const accountsApprovalDone = ordersInPO.every(order => order['Actual 2'] && String(order['Actual 2']).trim() !== '');
+      if (!accountsApprovalDone) return;
+
+      ordersInPO.forEach((order) => {
+        const firmKey = normalizeFirmKey(normalizeOrderFirmName(order['Firm Name']));
+        const productKey = normalizeItemKey(order['Product Name']);
+        const pendingQty = getOrderPendingQty(order);
+
+        if (!firmKey || !productKey || pendingQty <= 0) return;
+
+        const key = `${firmKey}::${productKey}`;
+        pendingMap[key] = (pendingMap[key] || 0) + pendingQty;
+      });
+    });
+  } catch (error) {
+    console.warn('Supabase finished good pending order sync failed:', error.message);
+  }
+
+  return pendingMap;
+};
+
+const buildFinishedGoodPurchaseMap = async () => {
+  const pageSize = 1000;
+  const purchaseMap = {};
+
+  try {
+    for (let from = 0; ; from += pageSize) {
+      const { data, error } = await purchaseSupabase
+        .from('LIFT-ACCOUNTS')
+        .select('id, "Firm Name", "Raw Material Name", "Actual Quantity"')
+        .order('id', { ascending: false })
+        .range(from, from + pageSize - 1);
+
+      if (error) throw error;
+
+      (data || []).forEach((row) => {
+        const firmKey = normalizeFirmKey(row['Firm Name']);
+        const productKey = normalizeItemKey(row['Raw Material Name']);
+        const rawQuantity = row['Actual Quantity'];
+        const quantity = Number(rawQuantity);
+
+        if (!firmKey || !productKey || rawQuantity === null || rawQuantity === '' || !Number.isFinite(quantity)) return;
+
+        const key = `${firmKey}::${productKey}`;
+        purchaseMap[key] = (purchaseMap[key] || 0) + quantity;
+      });
+
+      if (!data || data.length < pageSize) break;
+    }
+  } catch (error) {
+    console.warn('Supabase finished good purchase sync failed:', error.message);
+  }
+
+  return purchaseMap;
+};
+
+const buildFinishedGoodReturnMap = async () => {
+  const pageSize = 1000;
+  const firmByDoNumber = {};
+  const returnMap = {};
+
+  try {
+    for (let from = 0; ; from += pageSize) {
+      const { data, error } = await orderSupabase
+        .from('ORDER RECEIPT')
+        .select('"DO-Delivery Order No.", "Firm Name"')
+        .range(from, from + pageSize - 1);
+
+      if (error) throw error;
+
+      (data || []).forEach((row) => {
+        const doNumber = row['DO-Delivery Order No.'];
+        if (doNumber) {
+          firmByDoNumber[doNumber] = row['Firm Name'];
+        }
+      });
+
+      if (!data || data.length < pageSize) break;
+    }
+
+    for (let from = 0; ; from += pageSize) {
+      const { data, error } = await orderSupabase
+        .from('Material Return')
+        .select('id, "D.O Number", "Product Name", "Qty Of Return Material", "Qty", "Return Dispatched At", "Actual5", "Debit Note Issued At"')
+        .not('Actual5', 'is', null)
+        .not('Debit Note Issued At', 'is', null)
+        .range(from, from + pageSize - 1);
+
+      if (error) throw error;
+
+      (data || []).forEach((row) => {
+        const returnDispatchedAt = row['Return Dispatched At'] || '';
+        if (!returnDispatchedAt || String(returnDispatchedAt).trim() === '') return;
+
+        const firmKey = normalizeFirmKey(normalizeOrderFirmName(firmByDoNumber[row['D.O Number']]));
+        const productKey = normalizeItemKey(row['Product Name']);
+        if (!firmKey || !productKey) return;
+
+        const returnQty = Number(row['Qty Of Return Material']) || Number(row['Qty']) || 0;
+        const key = `${firmKey}::${productKey}`;
+        returnMap[key] = (returnMap[key] || 0) + returnQty;
+      });
+
+      if (!data || data.length < pageSize) break;
+    }
+  } catch (error) {
+    console.warn('Supabase finished good return sync failed:', error.message);
+  }
+
+  return returnMap;
+};
+
+const buildFinishedGoodAdjustmentMap = async () => {
+  const pageSize = 1000;
+  const adjustmentMap = {};
+
+  try {
+    for (let from = 0; ; from += pageSize) {
+      const { data, error } = await supabase
+        .from('stock_adjustment')
+        .select('firm_name, item_name, qty, status, material_type')
+        .eq('material_type', 'finish_good')
+        .range(from, from + pageSize - 1);
+
+      if (error) throw error;
+
+      (data || []).forEach((row) => {
+        const firmKey = normalizeFirmKey(row.firm_name);
+        const productKey = normalizeItemKey(row.item_name);
+        const qty = Number(row.qty || 0);
+        if (!firmKey || !productKey || !Number.isFinite(qty)) return;
+
+        const key = `${firmKey}::${productKey}`;
+        adjustmentMap[key] = (adjustmentMap[key] || 0) + (row.status === 'Factory -' ? -qty : qty);
+      });
+
+      if (!data || data.length < pageSize) break;
+    }
+  } catch (error) {
+    console.warn('Supabase finished good adjustment sync failed:', error.message);
+  }
+
+  return adjustmentMap;
 };
 
 const buildLiftDataMaps = async () => {
@@ -461,47 +782,67 @@ export const apiService = {
   getFinishGoodInventory: async (branch) => {
     try {
       const b = branch ? branch.toLowerCase().trim() : '';
-      if (b === 'all') {
-        const [rklRes, madhyaRes, purabRes] = await Promise.all([
-          supabase.from('finished_goods_rkl').select('*').order('sn', { ascending: true }),
-          supabase.from('finished_goods_pmmpl').select('*').order('s_no', { ascending: true }),
-          supabase.from('finished_good_purab').select('*').order('s_no', { ascending: true })
-        ]);
+      const productionMapPromise = buildFinishedGoodProductionMap();
+      const dispatchMapPromise = buildFinishedGoodDispatchMap();
+      const pendingOrderMapPromise = buildFinishedGoodPendingOrderMap();
+      const purchaseMapPromise = buildFinishedGoodPurchaseMap();
+      const returnMapPromise = buildFinishedGoodReturnMap();
+      const adjustmentMapPromise = buildFinishedGoodAdjustmentMap();
+      let query = supabase
+        .from('finished_goods_inventory_master')
+        .select('*')
+        .order('firm_name', { ascending: true })
+        .order('product_name', { ascending: true });
 
-        if (rklRes.error) throw rklRes.error;
-        if (madhyaRes.error) throw madhyaRes.error;
-        if (purabRes.error) throw purabRes.error;
+      if (b && b !== 'all') {
+        query = query.ilike('firm_name', b === 'madhya' ? 'Pmmpl' : branch);
+      }
 
-        return [
-          ...(rklRes.data || []).map(item => ({ ...item, firm_name: 'Rkl' })),
-          ...(madhyaRes.data || []).map(item => ({ ...item, firm_name: 'Pmmpl' })),
-          ...(purabRes.data || []).map(item => ({ ...item, firm_name: 'Purab' }))
-        ];
-      }
-      // RKL uses 'sn' as sort key; Purab & Pmmpl use 's_no'
-      if (b === 'rkl') {
-        const { data, error } = await supabase
-          .from('finished_goods_rkl')
-          .select('*')
-          .order('sn', { ascending: true });
-        if (error) throw error;
-        return (data || []).map(item => ({ ...item, firm_name: 'Rkl' }));
-      } else if (b === 'pmmpl' || b === 'madhya') {
-        const { data, error } = await supabase
-          .from('finished_goods_pmmpl')
-          .select('*')
-          .order('s_no', { ascending: true });
-        if (error) throw error;
-        return (data || []).map(item => ({ ...item, firm_name: 'Pmmpl' }));
-      } else {
-        // purab (default)
-        const { data, error } = await supabase
-          .from('finished_good_purab')
-          .select('*')
-          .order('s_no', { ascending: true });
-        if (error) throw error;
-        return (data || []).map(item => ({ ...item, firm_name: 'Purab' }));
-      }
+      const { data, error } = await query;
+      if (error) throw error;
+
+      const productionMap = await productionMapPromise;
+      const dispatchMap = await dispatchMapPromise;
+      const pendingOrderMap = await pendingOrderMapPromise;
+      const purchaseMap = await purchaseMapPromise;
+      const returnMap = await returnMapPromise;
+      const adjustmentMap = await adjustmentMapPromise;
+      return (data || [])
+        .map((item) => {
+          const key = `${normalizeFirmKey(item.firm_name)}::${normalizeItemKey(item.product_name)}`;
+          const productionQuantity = productionMap[key];
+          const dispatchQuantity = dispatchMap[key];
+          const pendingOrderQuantity = pendingOrderMap[key];
+          const purchaseQuantity = purchaseMap[key];
+          const returnQuantity = returnMap[key];
+          const adjustmentQuantity = adjustmentMap[key];
+          const hasCurrentLevelSync = productionQuantity !== undefined || dispatchQuantity !== undefined || purchaseQuantity !== undefined || returnQuantity !== undefined || adjustmentQuantity !== undefined;
+
+          return {
+            ...item,
+            stock_adjustment: adjustmentQuantity !== undefined ? adjustmentQuantity : item.stock_adjustment,
+            sales_order_pending: pendingOrderQuantity !== undefined ? pendingOrderQuantity : item.sales_order_pending,
+            purchase_material_received: purchaseQuantity !== undefined ? purchaseQuantity : item.purchase_material_received,
+            production: productionQuantity !== undefined ? productionQuantity : item.production,
+            sales: dispatchQuantity !== undefined ? dispatchQuantity : item.sales,
+            sales_return: returnQuantity !== undefined ? returnQuantity : item.sales_return,
+            current_level: hasCurrentLevelSync
+              ? numberOrZero(purchaseQuantity) + numberOrZero(productionQuantity) + numberOrZero(adjustmentQuantity) - numberOrZero(dispatchQuantity) + numberOrZero(returnQuantity)
+              : item.current_level,
+            _hasCurrentLevelSync: hasCurrentLevelSync
+          };
+        })
+        .sort((a, b) => {
+          if (a._hasCurrentLevelSync !== b._hasCurrentLevelSync) {
+            return a._hasCurrentLevelSync ? -1 : 1;
+          }
+          return 0;
+        })
+        .map((item) => {
+          const cleanedItem = { ...item };
+          delete cleanedItem._hasCurrentLevelSync;
+          return cleanedItem;
+        });
     } catch (e) {
       console.warn(`Supabase getFinishGoodInventory for ${branch} failed:`, e.message);
       return [];

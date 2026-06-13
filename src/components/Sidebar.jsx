@@ -8,6 +8,7 @@ import {
   Layers,
   IndianRupee,
   FileBarChart,
+  SlidersHorizontal,
   Settings,
   LogOut,
   ChevronLeft,
@@ -86,6 +87,7 @@ const Sidebar = () => {
     // { title: 'Crushing Item', path: '/crushing', icon: Layers },
     // { title: 'PMMPL Rates', path: '/pmmpl-rates', icon: IndianRupee },
     // { title: 'Reports Center', path: '/reports', icon: FileBarChart },
+    { title: "Stock Adjustment", path: "/stock-adjustment", icon: SlidersHorizontal },
     { title: "System Settings", path: "/settings", icon: Settings },
   ];
 
@@ -103,6 +105,7 @@ const Sidebar = () => {
       "Crushing Item": "Crushing",
       "PMMPL Rates": "PmmplRate",
       "Reports Center": "Reports",
+      "Stock Adjustment": null,
       "System Settings": "Settings",
     };
 
@@ -112,6 +115,9 @@ const Sidebar = () => {
     }
     if (item.title === "Finished Good") {
       return accessibleFinishGoodBranches.length > 0;
+    }
+    if (item.title === "Stock Adjustment") {
+      return accessibleBranches.length > 0;
     }
 
     const dbPageName = pageMapping[item.title];

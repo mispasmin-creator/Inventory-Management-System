@@ -43,6 +43,7 @@ const Header = () => {
     if (path === "/crushing") return "Crushing Operations";
     if (path === "/pmmpl-rates") return "PMMPL Rate Card";
     if (path === "/reports") return "Analytics & Reports";
+    if (path === "/stock-adjustment") return "Stock Adjustment";
     if (path === "/settings") return "System Settings";
     return "Inventory Control";
   };
