@@ -43,7 +43,7 @@ const AppLayout = () => {
       <Sidebar />
       <div className="flex-1 flex flex-col overflow-hidden">
         <Header />
-        <main className="flex-1 overflow-y-auto px-6 py-6 scroll-smooth">
+        <main className="main-content-area flex-1 overflow-y-auto px-3 py-5 sm:px-6 sm:py-6 scroll-smooth">
           <Routes>
             <Route path="/" element={<Dashboard />} />
             <Route path="/inventory" element={<BranchInventory />} />

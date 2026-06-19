@@ -1,179 +1,280 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
-  Bell,
   RefreshCw,
   Database,
-  User,
   Shield,
-  AlertTriangle,
-  ArrowRightLeft,
+  User,
+  ChevronDown,
+  LogOut,
 } from "lucide-react";
 import { useAuth } from "../hooks/useAuth";
-import { apiService } from "../services/api";
 import { motion, AnimatePresence } from "framer-motion";
 import { useNavigate, useLocation } from "react-router-dom";
 
 const Header = () => {
   const { user, logout } = useAuth();
-  const [notifications, setNotifications] = useState([]);
-  const [showNotifDropdown, setShowNotifDropdown] = useState(false);
   const [showProfileDropdown, setShowProfileDropdown] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const isMock = !import.meta.env.VITE_APPS_SCRIPT_URL;
   const navigate = useNavigate();
   const location = useLocation();
+  const dropdownRef = useRef(null);
 
-  // Map route to page title
+  // Close dropdown on outside click
+  useEffect(() => {
+    const handler = (e) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
+        setShowProfileDropdown(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
   const getPageTitle = () => {
     const path = location.pathname;
-    if (path === "/") return "Dashboard";
-    if (path === "/inventory") return "Inventory Control";
-    if (path === "/raw-material") return "Raw Material";
-    if (path === "/finished-good") return "Finished Good";
+    if (path === "/")                  return "Dashboard";
+    if (path === "/inventory")         return "Inventory Control";
+    if (path === "/raw-material")      return "Raw Material Inventory";
+    if (path === "/finished-good")     return "Finished Goods Inventory";
     if (path.startsWith("/branch/")) {
       const bName = path.split("/").pop();
-      return `${bName} Branch Raw Material`;
+      return `${bName} — Raw Material`;
     }
     if (path.startsWith("/finish-good/")) {
       const bName = path.split("/").pop();
-      return `${bName} Branch Finish Good`;
+      return `${bName} — Finished Good`;
     }
-    if (path === "/purchase") return "Purchase Management";
-    if (path === "/dispatch") return "Dispatch & Billing";
-    if (path === "/crushing") return "Crushing Operations";
-    if (path === "/pmmpl-rates") return "PMMPL Rate Card";
-    if (path === "/reports") return "Analytics & Reports";
-    if (path === "/stock-adjustment") return "Stock Adjustment";
-    if (path === "/settings") return "System Settings";
+    if (path === "/purchase")          return "Purchase Management";
+    if (path === "/dispatch")          return "Dispatch & Billing";
+    if (path === "/crushing")          return "Crushing Operations";
+    if (path === "/pmmpl-rates")       return "PMMPL Rate Card";
+    if (path === "/reports")           return "Analytics & Reports";
+    if (path === "/stock-adjustment")  return "Stock Adjustment";
+    if (path === "/settings")          return "System Settings";
     return "Inventory Control";
   };
 
-  const fetchAlerts = async () => {
-    if (!user) return;
-    try {
-      const list = [];
-
-      // 1. Fetch inventory to look for low stock alerts
-      const branchesToQuery =
-        user.branch === "All"
-          ? ["Main", "Madhya", "Rkl", "Purab"]
-          : Array.isArray(user.branch)
-            ? user.branch
-            : [user.branch];
-
-      for (const bName of branchesToQuery) {
-        const items = await apiService.getInventory(bName);
-        items.forEach((item) => {
-          if (item.currentStock <= item.minThreshold) {
-            list.push({
-              id: `low-${bName}-${item.itemId}`,
-              type: "low_stock",
-              title: "Low Stock Alert",
-              message: `${item.itemName} in ${bName} is at ${item.currentStock} ${item.unit} (Min: ${item.minThreshold})`,
-              severity: "high",
-              link: `/branch/${bName}`,
-            });
-          }
-        });
-      }
-
-      // 2. Fetch transfers for pending requests
-      const transfers = await apiService.getTransfers();
-      const pendingTransfers = transfers.filter((t) => t.status === "Pending");
-      pendingTransfers.forEach((t) => {
-        // Admins approve all, Branch managers see if it involves them
-        const isAuthorized =
-          user.role === "Admin" ||
-          (Array.isArray(user.branch)
-            ? user.branch.some(
-                (b) => b.toLowerCase() === t.toBranch.toLowerCase(),
-              )
-            : user.branch?.toLowerCase() === t.toBranch?.toLowerCase());
-        if (isAuthorized) {
-          list.push({
-            id: `transfer-${t.transferId}`,
-            type: "transfer_request",
-            title: "Material Transfer Request",
-            message: `${t.qty} ${t.unit} of ${t.itemName} requested: ${t.fromBranch} → ${t.toBranch}`,
-            severity: "info",
-            link:
-              user.role === "Admin"
-                ? `/branch/${t.toBranch}`
-                : `/branch/${t.fromBranch}`,
-          });
-        }
-      });
-
-      setNotifications(list);
-    } catch (e) {
-      console.error("Failed to load notification alerts:", e);
-    }
+  const getBreadcrumb = () => {
+    const path = location.pathname;
+    if (path === "/")                  return "Home";
+    if (path === "/raw-material")      return "Inventory / Raw Material";
+    if (path === "/finished-good")     return "Inventory / Finished Goods";
+    if (path === "/stock-adjustment")  return "Operations / Stock Adjustment";
+    if (path === "/settings")          return "Admin / Settings";
+    return "";
   };
 
-  useEffect(() => {
-    fetchAlerts();
-    // Poll notifications every 30 seconds
-    const interval = setInterval(fetchAlerts, 30000);
-    return () => clearInterval(interval);
-  }, [user]);
+  const userInitials = (user?.name || user?.username || "U")
+    .split(" ")
+    .map((w) => w[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
 
-  const handleRefresh = async () => {
+  const handleRefresh = () => {
     setRefreshing(true);
-    await fetchAlerts();
-    setTimeout(() => setRefreshing(false), 8000);
+    window.location.reload();
+    setTimeout(() => setRefreshing(false), 2000);
   };
 
   return (
-    <header className="h-[70px] glass-header shrink-0 flex items-center justify-between px-6 z-30 select-none">
-      {/* Title */}
-      <div>
-        <h1 className="font-semibold text-lg text-slate-900 hidden md:block">
+    <header
+      className="glass-header shrink-0 z-30 select-none"
+      style={{
+        height: '64px',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        padding: '0 28px',
+      }}
+    >
+      {/* ── Left: Page Title ──────────────────── */}
+      <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+        <h1
+          className="hidden md:block"
+          style={{
+            fontSize: '0.9375rem',
+            fontWeight: 600,
+            color: 'var(--ink)',
+            margin: 0,
+            lineHeight: 1.2,
+          }}
+        >
           {getPageTitle()}
         </h1>
+        {getBreadcrumb() && (
+          <span
+            className="hidden md:block"
+            style={{
+              fontSize: '0.68rem',
+              color: 'var(--ink-faint)',
+              marginTop: '2px',
+              letterSpacing: '0.01em',
+            }}
+          >
+            {getBreadcrumb()}
+          </span>
+        )}
       </div>
 
-      {/* Control Actions */}
-      <div className="flex items-center gap-4 ml-auto md:ml-0">
-        {/* Profile Dropdown */}
-        <div className="relative">
-          <button
-            onClick={() => {
-              setShowProfileDropdown(!showProfileDropdown);
-              setShowNotifDropdown(false);
+      {/* ── Right: Actions ───────────────────── */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+
+        {/* Refresh Button */}
+        <button
+          onClick={handleRefresh}
+          title="Refresh Data"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: '36px',
+            height: '36px',
+            borderRadius: '8px',
+            border: '1px solid var(--line)',
+            background: 'var(--surface-soft)',
+            color: 'var(--ink-muted)',
+            cursor: 'pointer',
+            transition: 'all 0.15s',
+          }}
+          onMouseEnter={e => {
+            e.currentTarget.style.background = 'var(--surface-mid)';
+            e.currentTarget.style.color = 'var(--ink)';
+          }}
+          onMouseLeave={e => {
+            e.currentTarget.style.background = 'var(--surface-soft)';
+            e.currentTarget.style.color = 'var(--ink-muted)';
+          }}
+        >
+          <RefreshCw
+            style={{
+              width: '14px',
+              height: '14px',
+              animation: refreshing ? 'spin 0.8s linear infinite' : 'none',
             }}
-            className="flex items-center gap-2 p-2 rounded-full bg-slate-100 border border-slate-200 text-slate-700 hover:bg-slate-200 cursor-pointer select-none"
+          />
+        </button>
+
+        {/* Divider */}
+        <div style={{ width: '1px', height: '24px', background: 'var(--line)' }} />
+
+        {/* Profile Dropdown */}
+        <div ref={dropdownRef} style={{ position: 'relative' }}>
+          <button
+            onClick={() => setShowProfileDropdown(!showProfileDropdown)}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              padding: '6px 10px 6px 6px',
+              borderRadius: '9px',
+              border: '1px solid var(--line)',
+              background: showProfileDropdown ? 'var(--surface-mid)' : 'var(--surface-soft)',
+              cursor: 'pointer',
+              transition: 'all 0.15s',
+            }}
+            onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-mid)'}
+            onMouseLeave={e => !showProfileDropdown && (e.currentTarget.style.background = 'var(--surface-soft)')}
           >
-            <span className="text-xs font-medium max-w-[100px] truncate hidden sm:inline">
-              {user?.name?.split(" ")[0] || "User"}
-            </span>
-            <div className="w-7 h-7 rounded-full bg-indigo-500 flex items-center justify-center text-white font-bold text-xs">
-              <User className="w-3.5 h-3.5" />
+            {/* Avatar */}
+            <div style={{
+              width: '28px',
+              height: '28px',
+              borderRadius: '7px',
+              background: 'var(--brand-green)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: '#fff',
+              fontWeight: 700,
+              fontSize: '0.65rem',
+              flexShrink: 0,
+            }}>
+              {userInitials}
             </div>
+            <div className="hidden sm:block" style={{ textAlign: 'left' }}>
+              <div style={{ fontSize: '0.78rem', fontWeight: 600, color: 'var(--ink)', lineHeight: 1.2, whiteSpace: 'nowrap' }}>
+                {user?.name?.split(" ")[0] || user?.username || "User"}
+              </div>
+              <div style={{ fontSize: '0.6rem', color: 'var(--ink-faint)', marginTop: '1px' }}>
+                {user?.role}
+              </div>
+            </div>
+            <ChevronDown
+              style={{
+                width: '13px',
+                height: '13px',
+                color: 'var(--ink-faint)',
+                transition: 'transform 0.2s',
+                transform: showProfileDropdown ? 'rotate(180deg)' : 'rotate(0deg)',
+              }}
+              className="hidden sm:block"
+            />
           </button>
 
           <AnimatePresence>
             {showProfileDropdown && (
               <motion.div
-                initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                initial={{ opacity: 0, y: 8, scale: 0.96 }}
                 animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                className="absolute right-0 mt-2.5 w-52 rounded-xl glass-dropdown shadow-2xl p-2 z-[99] text-xs"
+                exit={{ opacity: 0, y: 8, scale: 0.96 }}
+                transition={{ duration: 0.15 }}
+                style={{
+                  position: 'absolute',
+                  right: 0,
+                  top: 'calc(100% + 8px)',
+                  width: '220px',
+                  background: 'var(--surface)',
+                  border: '1px solid var(--line)',
+                  borderRadius: '12px',
+                  boxShadow: '0 8px 24px rgba(17,24,39,0.12)',
+                  overflow: 'hidden',
+                  zIndex: 99,
+                }}
               >
-                <div className="p-3 border-b border-slate-800">
-                  <p className="font-semibold text-slate-200">{user?.name}</p>
-                  <p className="text-[10px] text-slate-500 mt-0.5">
-                    {user?.username}
-                  </p>
-                </div>
-                <div className="mt-1 space-y-0.5">
-                  <div className="flex items-center gap-2 px-3 py-2 text-slate-400">
-                    <Shield className="w-3.5 h-3.5 shrink-0" />
-                    <span>Role: {user?.role}</span>
+                {/* User Info */}
+                <div style={{
+                  padding: '14px 16px',
+                  borderBottom: '1px solid var(--line)',
+                  background: 'var(--surface-soft)',
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <div style={{
+                      width: '36px', height: '36px', borderRadius: '9px',
+                      background: 'var(--brand-green)',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      color: '#fff', fontWeight: 700, fontSize: '0.75rem', flexShrink: 0,
+                    }}>
+                      {userInitials}
+                    </div>
+                    <div>
+                      <div style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--ink)' }}>
+                        {user?.name || user?.username}
+                      </div>
+                      <div style={{ fontSize: '0.68rem', color: 'var(--ink-faint)', marginTop: '1px' }}>
+                        {user?.username}
+                      </div>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-2 px-3 py-2 text-slate-400">
-                    <Database className="w-3.5 h-3.5 shrink-0" />
-                    <span>
-                      Scope:{" "}
+                </div>
+
+                {/* Meta Info */}
+                <div style={{ padding: '8px' }}>
+                  <div style={{
+                    display: 'flex', alignItems: 'center', gap: '8px',
+                    padding: '8px 10px', borderRadius: '7px',
+                    fontSize: '0.75rem', color: 'var(--ink-muted)',
+                  }}>
+                    <Shield style={{ width: '13px', height: '13px', color: 'var(--brand-green)', flexShrink: 0 }} />
+                    <span>Role: <strong style={{ color: 'var(--ink)' }}>{user?.role}</strong></span>
+                  </div>
+                  <div style={{
+                    display: 'flex', alignItems: 'center', gap: '8px',
+                    padding: '8px 10px', borderRadius: '7px',
+                    fontSize: '0.75rem', color: 'var(--ink-muted)',
+                  }}>
+                    <Database style={{ width: '13px', height: '13px', color: 'var(--brand-green)', flexShrink: 0 }} />
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       {user?.branch === "All"
                         ? "All Branches"
                         : Array.isArray(user?.branch)
@@ -182,16 +283,35 @@ const Header = () => {
                     </span>
                   </div>
                 </div>
-                <div className="border-t border-slate-800 mt-2 pt-1.5">
+
+                {/* Sign Out */}
+                <div style={{ padding: '6px 8px 10px', borderTop: '1px solid var(--line)' }}>
                   <button
                     onClick={() => {
                       setShowProfileDropdown(false);
                       logout();
                       navigate("/login");
                     }}
-                    className="flex w-full items-center gap-2 px-3 py-2 rounded-lg text-rose-600 hover:bg-rose-100 cursor-pointer"
+                    style={{
+                      display: 'flex',
+                      width: '100%',
+                      alignItems: 'center',
+                      gap: '8px',
+                      padding: '8px 10px',
+                      borderRadius: '7px',
+                      fontSize: '0.78rem',
+                      fontWeight: 500,
+                      color: '#dc2626',
+                      background: 'transparent',
+                      border: 'none',
+                      cursor: 'pointer',
+                      transition: 'background 0.15s',
+                    }}
+                    onMouseEnter={e => e.currentTarget.style.background = '#fef2f2'}
+                    onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
                   >
-                    <span>Sign Out</span>
+                    <LogOut style={{ width: '14px', height: '14px' }} />
+                    Sign Out
                   </button>
                 </div>
               </motion.div>
@@ -199,6 +319,10 @@ const Header = () => {
           </AnimatePresence>
         </div>
       </div>
+
+      <style>{`
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+      `}</style>
     </header>
   );
 };

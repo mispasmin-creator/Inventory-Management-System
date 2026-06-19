@@ -24,6 +24,7 @@ import {
   FileBarChart,
   Cog,
   PackageOpen,
+  SlidersHorizontal,
 } from 'lucide-react';
 
 // Page access groups — each with sub-pages
@@ -47,11 +48,7 @@ const ALL_PAGE_GROUPS = [
     ]
   },
   { group: null, pages: [
-    { key: 'Purchase',  label: 'Purchase Entry',   icon: ShoppingCart },
-    { key: 'Dispatch',  label: 'Dispatch (Sales)', icon: Send },
-    { key: 'Crushing',  label: 'Crushing Item',    icon: Layers },
-    { key: 'PmmplRate', label: 'PMMPL Rates',      icon: IndianRupee },
-    { key: 'Reports',   label: 'Reports Center',   icon: FileBarChart },
+    { key: 'StockAdjustment', label: 'Stock Adjustment', icon: SlidersHorizontal },
     { key: 'Settings',  label: 'System Settings',  icon: Cog },
     { key: 'Dashboard', label: 'Dashboard',        icon: LayoutDashboard },
   ]},
@@ -104,7 +101,7 @@ const Settings = () => {
     try {
       const { data, error } = await supabase
         .from('login')
-        .select('id, username, role, firm_name, page_access, created_at')
+        .select('id, username, password, role, firm_name, page_access, created_at')
         .order('created_at', { ascending: false });
       if (error) throw error;
       setUsers(data || []);
@@ -168,7 +165,7 @@ const Settings = () => {
     setSelectedUser(usr);
     setForm({
       username: usr.username,
-      password: '',           // don't pre-fill password
+      password: usr.password || '', // pre-fill password
       role: usr.role,
       firms: firmStringToArray(usr.firm_name),
       page_access: (usr.page_access || []).map(normalizePageAccessKey),
@@ -295,16 +292,16 @@ const Settings = () => {
         </div>
         <div className="space-y-1">
           <label className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider pl-0.5">
-            {isEdit ? 'New Password (leave blank to keep)' : 'Password'}
+            Password
           </label>
           <div className="relative">
             <input
               type={showPassword ? 'text' : 'password'}
               value={form.password}
               onChange={e => setForm(p => ({ ...p, password: e.target.value }))}
-              placeholder={isEdit ? 'Leave blank to keep current' : 'Enter password'}
+              placeholder="Enter password"
               className="w-full px-3 py-2.5 pr-9 text-xs rounded-lg glass-input"
-              required={!isEdit}
+              required
             />
             <button
               type="button"
@@ -327,55 +324,12 @@ const Settings = () => {
           onChange={e => setForm(p => ({ ...p, role: e.target.value }))}
           className="w-full px-3 py-2.5 text-xs rounded-lg glass-input appearance-none bg-slate-900"
         >
-          {ROLES.map(r => <option key={r} value={r}>{r}</option>)}
-        </select>
-      </div>
-
-      {/* Firm / Branch multi-select */}
-      <div className="space-y-2">
-        <label className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider pl-0.5">
-          Firm / Branch Access
-        </label>
-        <div className="grid grid-cols-2 gap-2">
-          {/* All Branches toggle */}
-          <label
-            className={`flex items-center gap-2.5 px-3 py-2 rounded-lg border cursor-pointer transition-all text-xs select-none col-span-2 ${
-              form.firms.includes('All')
-                ? 'bg-emerald-950/40 border-emerald-500/40 text-emerald-300'
-                : 'bg-slate-900/30 border-slate-800 text-slate-500 hover:border-slate-700'
-            }`}
-          >
-            <input
-              type="checkbox"
-              checked={form.firms.includes('All')}
-              onChange={() => toggleFirm('All')}
-              className="accent-emerald-500 w-3 h-3"
-            />
-            All Branches
-          </label>
-          {/* Individual branches */}
-          {BRANCH_OPTIONS.map(f => (
-            <label
-              key={f}
-              className={`flex items-center gap-2.5 px-3 py-2 rounded-lg border cursor-pointer transition-all text-xs select-none ${
-                form.firms.includes(f) || form.firms.includes('All')
-                  ? 'bg-indigo-950/40 border-indigo-500/40 text-indigo-300'
-                  : 'bg-slate-900/30 border-slate-800 text-slate-500 hover:border-slate-700'
-              }`}
-            >
-              <input
-                type="checkbox"
-                checked={form.firms.includes(f) || form.firms.includes('All')}
-                onChange={() => toggleFirm(f)}
-                className="accent-indigo-500 w-3 h-3"
-              />
-              {f} Branch
-            </label>
+          {ROLES.map(r => (
+            <option key={r} value={r}>
+              {r === 'Admin' ? 'Admin' : r === 'User' ? 'User' : 'Viewer (View Only)'}
+            </option>
           ))}
-        </div>
-        <p className="text-[10px] text-slate-600 pl-0.5">
-          Select one or more branches. Selecting "All Branches" grants access to all.
-        </p>
+        </select>
       </div>
 
       {/* Page Access — shown for non-Admin roles */}
@@ -504,89 +458,167 @@ const Settings = () => {
             <span>No users found</span>
           </div>
         ) : (
-          <div className="max-h-[500px] overflow-auto">
-            <table className="w-full text-xs border-collapse">
-              <thead className="sticky top-0 z-10">
-                <tr className="border-b border-slate-800 bg-slate-900">
-                  <th className="text-left px-5 py-3.5 text-[10px] font-semibold text-slate-500 uppercase tracking-wider sticky top-0 bg-slate-900 z-10">Username</th>
-                  <th className="text-left px-5 py-3.5 text-[10px] font-semibold text-slate-500 uppercase tracking-wider sticky top-0 bg-slate-900 z-10">Role</th>
-                  <th className="text-left px-5 py-3.5 text-[10px] font-semibold text-slate-500 uppercase tracking-wider sticky top-0 bg-slate-900 z-10">Firm / Branch</th>
-                  <th className="text-left px-5 py-3.5 text-[10px] font-semibold text-slate-500 uppercase tracking-wider sticky top-0 bg-slate-900 z-10">Page Access</th>
-                  <th className="text-left px-5 py-3.5 text-[10px] font-semibold text-slate-500 uppercase tracking-wider sticky top-0 bg-slate-900 z-10">Created</th>
-                  {isAdmin && (
-                    <th className="text-right px-5 py-3.5 text-[10px] font-semibold text-slate-500 uppercase tracking-wider sticky top-0 bg-slate-900 z-10">Actions</th>
-                  )}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-800/60">
-                {users.map(usr => (
-                  <tr key={usr.id} className="hover:bg-slate-800/20 transition-colors">
-                    <td className="px-5 py-3.5">
-                      <div className="flex items-center gap-2">
-                        <div className="w-7 h-7 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center text-[10px] font-bold text-slate-300 uppercase">
-                          {usr.username.slice(0, 2)}
-                        </div>
-                        <span className="font-semibold text-slate-200">{usr.username}</span>
-                      </div>
-                    </td>
-                    <td className="px-5 py-3.5">
-                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border ${roleBadge(usr.role)}`}>
-                        {usr.role}
-                      </span>
-                    </td>
-                    <td className="px-5 py-3.5">
-                      <div className="flex items-center gap-1.5 text-slate-400">
-                        <Building2 className="w-3 h-3" />
-                        <span>{usr.firm_name === 'All' ? 'All Branches' : `${firmStringToArray(usr.firm_name).join(', ')} Branch`}</span>
-                      </div>
-                    </td>
-                    <td className="px-5 py-3.5">
-                      {usr.role === 'Admin' ? (
-                        <span className="text-violet-400 flex items-center gap-1 text-[10px]">
-                          <ShieldCheck className="w-3 h-3" /> Full Access
-                        </span>
-                      ) : (usr.page_access || []).length === 0 ? (
-                        <span className="text-slate-600 italic">No pages assigned</span>
-                      ) : (
-                        <div className="flex flex-wrap gap-1">
-                          {(usr.page_access || []).map(p => {
-                            const pg = ALL_PAGE_GROUPS.flatMap(g => g.pages).find(pg => pg.key === p);
-                            return (
-                              <span key={p} className="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-400 text-[9px] font-medium">
-                                {pg?.label || p}
-                              </span>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </td>
-                    <td className="px-5 py-3.5 text-slate-500">
-                      {new Date(usr.created_at).toLocaleDateString()}
-                    </td>
+          <div>
+            {/* Desktop Table View */}
+            <div className="hidden md:block max-h-[500px] overflow-auto">
+              <table className="w-full text-xs border-collapse">
+                <thead className="sticky top-0 z-10">
+                  <tr className="border-b border-slate-800 bg-slate-900">
+                    <th className="text-left px-5 py-3.5 text-[10px] font-semibold text-slate-500 uppercase tracking-wider sticky top-0 bg-slate-900 z-10">Username</th>
+                    <th className="text-left px-5 py-3.5 text-[10px] font-semibold text-slate-500 uppercase tracking-wider sticky top-0 bg-slate-900 z-10">Role</th>
+                    <th className="text-left px-5 py-3.5 text-[10px] font-semibold text-slate-500 uppercase tracking-wider sticky top-0 bg-slate-900 z-10">Firm / Branch</th>
+                    <th className="text-left px-5 py-3.5 text-[10px] font-semibold text-slate-500 uppercase tracking-wider sticky top-0 bg-slate-900 z-10">Page Access</th>
+                    <th className="text-left px-5 py-3.5 text-[10px] font-semibold text-slate-500 uppercase tracking-wider sticky top-0 bg-slate-900 z-10">Created</th>
                     {isAdmin && (
-                      <td className="px-5 py-3.5">
-                        <div className="flex items-center gap-1.5 justify-end">
-                          <button
-                            onClick={() => openEdit(usr)}
-                            className="p-1.5 rounded-lg bg-slate-800/60 border border-slate-700/50 text-slate-400 hover:text-indigo-300 hover:border-indigo-500/30 hover:bg-indigo-950/30 transition-all cursor-pointer"
-                            title="Edit user"
-                          >
-                            <Edit3 className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            onClick={() => { setDeleteTarget(usr); setDeleteOpen(true); }}
-                            className="p-1.5 rounded-lg bg-slate-800/60 border border-slate-700/50 text-slate-400 hover:text-rose-300 hover:border-rose-500/30 hover:bg-rose-950/30 transition-all cursor-pointer"
-                            title="Delete user"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </td>
+                      <th className="text-right px-5 py-3.5 text-[10px] font-semibold text-slate-500 uppercase tracking-wider sticky top-0 bg-slate-900 z-10">Actions</th>
                     )}
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody className="divide-y divide-slate-800/60">
+                  {users.map(usr => (
+                    <tr key={usr.id} className="hover:bg-slate-800/20 transition-colors">
+                      <td className="px-5 py-3.5">
+                        <div className="flex items-center gap-2">
+                          <div className="w-7 h-7 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center text-[10px] font-bold text-slate-300 uppercase">
+                            {usr.username.slice(0, 2)}
+                          </div>
+                          <span className="font-semibold text-slate-200">{usr.username}</span>
+                        </div>
+                      </td>
+                      <td className="px-5 py-3.5">
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border ${roleBadge(usr.role)}`}>
+                          {usr.role}
+                        </span>
+                      </td>
+                      <td className="px-5 py-3.5">
+                        <div className="flex items-center gap-1.5 text-slate-400">
+                          <Building2 className="w-3 h-3" />
+                          <span>{usr.firm_name === 'All' ? 'All Branches' : `${firmStringToArray(usr.firm_name).join(', ')} Branch`}</span>
+                        </div>
+                      </td>
+                      <td className="px-5 py-3.5">
+                        {usr.role === 'Admin' ? (
+                          <span className="text-violet-400 flex items-center gap-1 text-[10px]">
+                            <ShieldCheck className="w-3 h-3" /> Full Access
+                          </span>
+                        ) : (usr.page_access || []).length === 0 ? (
+                          <span className="text-slate-600 italic">No pages assigned</span>
+                        ) : (
+                          <div className="flex flex-wrap gap-1">
+                            {(usr.page_access || []).map(p => {
+                              const pg = ALL_PAGE_GROUPS.flatMap(g => g.pages).find(pg => pg.key === p);
+                              return (
+                                <span key={p} className="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-400 text-[9px] font-medium">
+                                  {pg?.label || p}
+                                </span>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </td>
+                      <td className="px-5 py-3.5 text-slate-500">
+                        {new Date(usr.created_at).toLocaleDateString()}
+                      </td>
+                      {isAdmin && (
+                        <td className="px-5 py-3.5">
+                          <div className="flex items-center gap-1.5 justify-end">
+                            <button
+                              onClick={() => openEdit(usr)}
+                              className="p-1.5 rounded-lg bg-slate-800/60 border border-slate-700/50 text-slate-400 hover:text-indigo-300 hover:border-indigo-500/30 hover:bg-indigo-950/30 transition-all cursor-pointer"
+                              title="Edit user"
+                            >
+                              <Edit3 className="w-3.5 h-3.5 text-black" />
+                            </button>
+                            <button
+                              onClick={() => { setDeleteTarget(usr); setDeleteOpen(true); }}
+                              className="p-1.5 rounded-lg bg-slate-800/60 border border-slate-700/50 text-slate-400 hover:text-rose-300 hover:border-rose-500/30 hover:bg-rose-950/30 transition-all cursor-pointer"
+                              title="Delete user"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </td>
+                      )}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Mobile Card View */}
+            <div className="block md:hidden max-h-[500px] overflow-auto divide-y divide-slate-800/60">
+              {users.map(usr => (
+                <div key={usr.id} className="p-4 space-y-3 hover:bg-slate-800/10 transition-colors">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-8 h-8 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center text-[10px] font-bold text-slate-300 uppercase">
+                        {usr.username.slice(0, 2)}
+                      </div>
+                      <div>
+                        <span className="font-semibold text-slate-200 text-sm block">{usr.username}</span>
+                        <span className="text-[10px] text-slate-500">{new Date(usr.created_at).toLocaleDateString()}</span>
+                      </div>
+                    </div>
+                    {isAdmin && (
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          onClick={() => openEdit(usr)}
+                          className="p-1.5 rounded-lg bg-slate-800/60 border border-slate-700/50 text-slate-400 hover:text-indigo-300 hover:border-indigo-500/30 hover:bg-indigo-950/30 transition-all cursor-pointer"
+                          title="Edit user"
+                        >
+                          <Edit3 className="w-3.5 h-3.5 text-black" />
+                        </button>
+                        <button
+                          onClick={() => { setDeleteTarget(usr); setDeleteOpen(true); }}
+                          className="p-1.5 rounded-lg bg-slate-800/60 border border-slate-700/50 text-slate-400 hover:text-rose-300 hover:border-rose-500/30 hover:bg-rose-950/30 transition-all cursor-pointer"
+                          title="Delete user"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2.5 pt-1">
+                    <div className="space-y-0.5">
+                      <span className="text-[9px] uppercase font-bold tracking-wider text-slate-500 block">Role</span>
+                      <span className={`inline-block px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider border ${roleBadge(usr.role)}`}>
+                        {usr.role}
+                      </span>
+                    </div>
+                    <div className="space-y-0.5">
+                      <span className="text-[9px] uppercase font-bold tracking-wider text-slate-500 block">Firm / Branch</span>
+                      <div className="flex items-center gap-1 text-slate-400 text-xs">
+                        <Building2 className="w-3.5 h-3.5 shrink-0" />
+                        <span className="truncate">{usr.firm_name === 'All' ? 'All Branches' : `${firmStringToArray(usr.firm_name).join(', ')} Branch`}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="space-y-1 pt-1 border-t border-slate-800/40">
+                    <span className="text-[9px] uppercase font-bold tracking-wider text-slate-500 block">Page Access</span>
+                    {usr.role === 'Admin' ? (
+                      <span className="text-violet-400 flex items-center gap-1 text-[10px]">
+                        <ShieldCheck className="w-3.5 h-3.5" /> Full Access
+                      </span>
+                    ) : (usr.page_access || []).length === 0 ? (
+                      <span className="text-slate-600 italic text-[11px]">No pages assigned</span>
+                    ) : (
+                      <div className="flex flex-wrap gap-1">
+                        {(usr.page_access || []).map(p => {
+                          const pg = ALL_PAGE_GROUPS.flatMap(g => g.pages).find(pg => pg.key === p);
+                          return (
+                            <span key={p} className="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-400 text-[9px] font-medium">
+                              {pg?.label || p}
+                            </span>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         )}
       </GlassCard>
@@ -594,9 +626,9 @@ const Settings = () => {
       {/* Legend */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         {[
-          { icon: ShieldCheck, color: 'text-violet-400', bg: 'bg-violet-950/20 border-violet-500/15', title: 'Admin', desc: 'Full access to all pages, all branches, and user management.' },
-          { icon: UserCheck, color: 'text-indigo-400', bg: 'bg-indigo-950/20 border-indigo-500/15', title: 'User', desc: 'Assigned branch data entry and reporting access.' },
-          { icon: Lock, color: 'text-slate-400', bg: 'bg-slate-900/40 border-slate-700/30', title: 'Viewer', desc: 'Read-only access to assigned pages only.' },
+          // { icon: ShieldCheck, color: 'text-violet-400', bg: 'bg-violet-950/20 border-violet-500/15', title: 'Admin', desc: 'Full access to all pages, all branches, and user management.' },
+          // { icon: UserCheck, color: 'text-indigo-400', bg: 'bg-indigo-950/20 border-indigo-500/15', title: 'User', desc: 'Assigned branch data entry and reporting access.' },
+          // { icon: Lock, color: 'text-slate-400', bg: 'bg-slate-900/40 border-slate-700/30', title: 'Viewer', desc: 'Viewer (View Only) access to assigned pages only.' },
         ].map(({ icon: Icon, color, bg, title, desc }) => (
           <div key={title} className={`flex items-start gap-3 px-4 py-3 rounded-xl border ${bg} text-xs`}>
             <Icon className={`w-4 h-4 shrink-0 mt-0.5 ${color}`} />

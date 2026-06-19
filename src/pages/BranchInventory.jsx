@@ -88,13 +88,34 @@ const BranchInventory = () => {
   const routeType = location.pathname.startsWith('/finish-good') || location.pathname.startsWith('/finished-good') ? 'finish_good' : 'raw_material';
   const type = routeType;
   const [selectedBranch, setSelectedBranch] = useState(routeBranchName || '');
+  const [selectedDate, setSelectedDate] = useState(()=>{
+    const d = new Date();
+    d.setDate(d.getDate()-1);
+    return d.toISOString().split('T')[0];
+  });
   const isFinishGood = type === 'finish_good';
-  const accessibleBranchOptions = branchOptions;
-  const branchFilterOptions = ['All', ...branchOptions];
+
+  const accessibleBranchOptions = React.useMemo(() => {
+    return branchOptions.filter(branch => canAccessBranch(branch, type));
+  }, [type, canAccessBranch]);
+
+  const branchFilterOptions = React.useMemo(() => {
+    if (accessibleBranchOptions.length > 1) {
+      return ['All', ...accessibleBranchOptions];
+    }
+    return accessibleBranchOptions;
+  }, [accessibleBranchOptions]);
+
   const defaultBranch = branchFilterOptions[0] || routeBranchName || branchOptions[0];
   const activeBranch = selectedBranch || defaultBranch;
   const hasInventoryAccess = accessibleBranchOptions.length > 0;
-  const canReadActiveBranch = hasInventoryAccess;
+
+  const canReadActiveBranch = React.useMemo(() => {
+    if (activeBranch === 'All') {
+      return hasInventoryAccess;
+    }
+    return accessibleBranchOptions.includes(activeBranch);
+  }, [activeBranch, accessibleBranchOptions, hasInventoryAccess]);
 
   // User privileges
   const isEditable = activeBranch !== 'All' && canAccessBranch(activeBranch, type) && user?.role !== 'Viewer';
@@ -105,16 +126,16 @@ const BranchInventory = () => {
 
   useEffect(() => {
     if (!hasInventoryAccess) return;
-    if (activeBranch !== 'All' && !accessibleBranchOptions.includes(activeBranch)) {
+    if (!branchFilterOptions.includes(activeBranch)) {
       setSelectedBranch(accessibleBranchOptions[0]);
     }
-  }, [activeBranch, accessibleBranchOptions, hasInventoryAccess]);
+  }, [activeBranch, accessibleBranchOptions, branchFilterOptions, hasInventoryAccess]);
 
   useEffect(() => {
     if (!activeBranch || !canReadActiveBranch) return;
-    fetchInventory(activeBranch, type);
+    fetchInventory(activeBranch, type, type === 'finish_good' ? selectedDate : '');
     fetchTransfers();
-  }, [activeBranch, type, canReadActiveBranch]);
+  }, [activeBranch, type, canReadActiveBranch, selectedDate]);
 
   useEffect(() => {
     if (type !== 'raw_material' || !activeBranch || !canReadActiveBranch) return undefined;
@@ -159,11 +180,19 @@ const BranchInventory = () => {
     setTransfersLoading(true);
     try {
       const data = await apiService.getTransfers();
-      // Filter transfers relative to this branch
-      const relativeTransfers = data.filter(t => 
-        t.fromBranch.toLowerCase() === activeBranch.toLowerCase() || 
-        t.toBranch.toLowerCase() === activeBranch.toLowerCase()
-      );
+      // Filter transfers relative to this branch / accessible branches
+      const relativeTransfers = data.filter(t => {
+        if (activeBranch === 'All') {
+          return accessibleBranchOptions.some(b => 
+            t.fromBranch.toLowerCase() === b.toLowerCase() || 
+            t.toBranch.toLowerCase() === b.toLowerCase()
+          );
+        }
+        return (
+          t.fromBranch.toLowerCase() === activeBranch.toLowerCase() || 
+          t.toBranch.toLowerCase() === activeBranch.toLowerCase()
+        );
+      });
       setTransferRequests(relativeTransfers);
     } catch (e) {
       console.error('Failed to load transfers:', e);
@@ -299,7 +328,7 @@ const BranchInventory = () => {
   const renderFinishGoodNumber = (value) => value !== null && value !== undefined && value !== '' ? Number(value).toLocaleString() : '-';
 
   const finishGoodColumns = [
-    { header: 'ID', accessor: 'id' },
+    { header: 'S.N.', accessor: '_sn', render: (row, rowIndex) => rowIndex + 1 },
     { header: 'Firm Name', accessor: 'firm_name' },
     { header: 'Product Name', accessor: 'product_name' },
     { header: 'Op. Stock', accessor: 'op_stock', render: (row) => renderFinishGoodNumber(row.op_stock) },
@@ -415,6 +444,32 @@ const BranchInventory = () => {
     });
   }, [inventoryItems, rawFactoryEntries, type]);
 
+  const displayedInventoryItems = React.useMemo(() => {
+    const filtered = (processedInventoryItems || []).filter(item => {
+      const firmName = item.firm_name || '';
+      const normFirm = firmName.toLowerCase().trim() === 'madhya' ? 'pmmpl' : firmName.toLowerCase().trim();
+      return accessibleBranchOptions.some(b => {
+        const normB = b.toLowerCase().trim() === 'madhya' ? 'pmmpl' : b.toLowerCase().trim();
+        return normFirm === normB;
+      });
+    });
+
+    if (isFinishGood) {
+      // Rows with any meaningful data come first, empty rows at the bottom
+      const hasData = (item) => {
+        const fields = ['op_stock', 'production', 'sales', 'sales_return', 'consumption', 'current_level', 'purchase_material_received', 'stock_adjustment', 'sales_order_pending'];
+        return fields.some(f => item[f] !== null && item[f] !== undefined && Number(item[f]) !== 0);
+      };
+      return [...filtered].sort((a, b) => {
+        const aHas = hasData(a) ? 0 : 1;
+        const bHas = hasData(b) ? 0 : 1;
+        return aHas - bHas;
+      });
+    }
+
+    return filtered;
+  }, [processedInventoryItems, accessibleBranchOptions, isFinishGood]);
+
   // Pick correct column set
   const inventoryColumns = isFinishGood ? finishGoodColumns : rawMaterialColumns;
 
@@ -522,7 +577,28 @@ const BranchInventory = () => {
             Realtime database entries synced for the {activeBranch === 'All' ? 'all firms' : activeBranch} {isFinishGood ? 'finish goods' : 'raw materials'} stocks.
           </p>
         </div>
-        <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
+        <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto items-start sm:items-center">
+          {isFinishGood && (
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-slate-400 font-medium shrink-0">Opening Stock Date:</span>
+              <input
+                type="date"
+                value={selectedDate}
+                onChange={(e) => setSelectedDate(e.target.value)}
+                className="px-3 py-2 text-xs rounded-lg glass-input bg-slate-900 text-slate-100 outline-none border border-slate-700/50 focus:border-indigo-500"
+              />
+              {selectedDate && (
+                <button
+                  type="button"
+                  onClick={() => setSelectedDate('')}
+                  className="px-2.5 py-2 text-[10px] font-bold text-rose-400 hover:text-rose-300 bg-rose-950/20 hover:bg-rose-900/30 border border-rose-500/20 rounded-lg cursor-pointer"
+                  title="Clear Date Filter"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+          )}
           <select
             value={activeBranch}
             onChange={(e) => setSelectedBranch(e.target.value)}
@@ -537,11 +613,11 @@ const BranchInventory = () => {
       </div>
 
       {/* Main Tab Renderings */}
-      <GlassCard className="p-6">
+      <GlassCard className="p-2 sm:p-6">
         {hasInventoryAccess ? (
           <Table
             columns={inventoryColumns}
-            data={processedInventoryItems}
+            data={displayedInventoryItems}
             searchPlaceholder="Search materials by name or colour..."
             filterKey="colour"
             filterOptions={['Low', 'Optimum', 'Extra']}

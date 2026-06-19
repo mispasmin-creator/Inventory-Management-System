@@ -33,6 +33,23 @@ const normalizeItemKey = (value) =>
     .toLowerCase()
     .replace(/[^a-z0-9]/g, '');
 
+const getLocalDateString = (val) => {
+  if (!val) return '';
+  if (typeof val === 'string') {
+    const trimmed = val.trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
+    if (/^\d{4}\/\d{2}\/\d{2}$/.test(trimmed)) return trimmed.replace(/\//g, '-');
+    const match = trimmed.match(/^(\d{4}-\d{2}-\d{2})[ T]/);
+    if (match) return match[1];
+  }
+  const d = new Date(val);
+  if (Number.isNaN(d.getTime())) return '';
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+};
+
 const isBlankValue = (value) =>
   value === null || value === undefined || (typeof value === 'string' && value.trim() === '');
 
@@ -301,7 +318,7 @@ const buildCrushingActualLevelMap = async () => {
   return crushingAdjustmentMap;
 };
 
-const buildFinishedGoodProductionMap = async () => {
+const buildFinishedGoodProductionMap = async (selectedDate = '') => {
   const pageSize = 1000;
   const productionMap = {};
 
@@ -324,7 +341,17 @@ const buildFinishedGoodProductionMap = async () => {
         if (!firmKey || !productKey || rawQuantity === null || rawQuantity === '' || !Number.isFinite(quantity)) return;
 
         const key = `${firmKey}::${productKey}`;
-        productionMap[key] = (productionMap[key] || 0) + quantity;
+        if (!productionMap[key]) {
+          productionMap[key] = { before: 0, after: 0, total: 0 };
+        }
+
+        const rowDate = getLocalDateString(row.Timestamp);
+        productionMap[key].total += quantity;
+        if (selectedDate && rowDate && rowDate > selectedDate) {
+          productionMap[key].after += quantity;
+        } else {
+          productionMap[key].before += quantity;
+        }
       });
 
       if (!data || data.length < pageSize) break;
@@ -336,7 +363,7 @@ const buildFinishedGoodProductionMap = async () => {
   return productionMap;
 };
 
-const buildFinishedGoodDispatchMap = async () => {
+const buildFinishedGoodDispatchMap = async (selectedDate = '') => {
   const pageSize = 1000;
   const orderMap = new Map();
   const dispatchMap = {};
@@ -377,7 +404,17 @@ const buildFinishedGoodDispatchMap = async () => {
 
         const truckQty = Number(row['Actual Truck Qty']) || Number(row['Qty To Be Dispatched']) || 0;
         const key = `${firmKey}::${productKey}`;
-        dispatchMap[key] = (dispatchMap[key] || 0) + truckQty;
+        if (!dispatchMap[key]) {
+          dispatchMap[key] = { before: 0, after: 0, total: 0 };
+        }
+
+        const rowDate = getLocalDateString(fullkittingAt);
+        dispatchMap[key].total += truckQty;
+        if (selectedDate && rowDate && rowDate > selectedDate) {
+          dispatchMap[key].after += truckQty;
+        } else {
+          dispatchMap[key].before += truckQty;
+        }
       });
 
       if (!data || data.length < pageSize) break;
@@ -452,7 +489,7 @@ const buildFinishedGoodPendingOrderMap = async () => {
   return pendingMap;
 };
 
-const buildFinishedGoodPurchaseMap = async () => {
+const buildFinishedGoodPurchaseMap = async (selectedDate = '') => {
   const pageSize = 1000;
   const purchaseMap = {};
 
@@ -460,7 +497,7 @@ const buildFinishedGoodPurchaseMap = async () => {
     for (let from = 0; ; from += pageSize) {
       const { data, error } = await purchaseSupabase
         .from('LIFT-ACCOUNTS')
-        .select('id, "Firm Name", "Raw Material Name", "Actual Quantity"')
+        .select('id, "Firm Name", "Raw Material Name", "Actual Quantity", "Date Of Receiving", "Timestamp"')
         .order('id', { ascending: false })
         .range(from, from + pageSize - 1);
 
@@ -475,7 +512,17 @@ const buildFinishedGoodPurchaseMap = async () => {
         if (!firmKey || !productKey || rawQuantity === null || rawQuantity === '' || !Number.isFinite(quantity)) return;
 
         const key = `${firmKey}::${productKey}`;
-        purchaseMap[key] = (purchaseMap[key] || 0) + quantity;
+        if (!purchaseMap[key]) {
+          purchaseMap[key] = { before: 0, after: 0, total: 0 };
+        }
+
+        const rowDate = getLocalDateString(row['Date Of Receiving'] || row['Timestamp']);
+        purchaseMap[key].total += quantity;
+        if (selectedDate && rowDate && rowDate > selectedDate) {
+          purchaseMap[key].after += quantity;
+        } else {
+          purchaseMap[key].before += quantity;
+        }
       });
 
       if (!data || data.length < pageSize) break;
@@ -487,7 +534,7 @@ const buildFinishedGoodPurchaseMap = async () => {
   return purchaseMap;
 };
 
-const buildFinishedGoodReturnMap = async () => {
+const buildFinishedGoodReturnMap = async (selectedDate = '') => {
   const pageSize = 1000;
   const firmByDoNumber = {};
   const returnMap = {};
@@ -531,7 +578,17 @@ const buildFinishedGoodReturnMap = async () => {
 
         const returnQty = Number(row['Qty Of Return Material']) || Number(row['Qty']) || 0;
         const key = `${firmKey}::${productKey}`;
-        returnMap[key] = (returnMap[key] || 0) + returnQty;
+        if (!returnMap[key]) {
+          returnMap[key] = { before: 0, after: 0, total: 0 };
+        }
+
+        const rowDate = getLocalDateString(returnDispatchedAt);
+        returnMap[key].total += returnQty;
+        if (selectedDate && rowDate && rowDate > selectedDate) {
+          returnMap[key].after += returnQty;
+        } else {
+          returnMap[key].before += returnQty;
+        }
       });
 
       if (!data || data.length < pageSize) break;
@@ -543,7 +600,7 @@ const buildFinishedGoodReturnMap = async () => {
   return returnMap;
 };
 
-const buildFinishedGoodAdjustmentMap = async () => {
+const buildFinishedGoodAdjustmentMap = async (selectedDate = '') => {
   const pageSize = 1000;
   const adjustmentMap = {};
 
@@ -551,7 +608,7 @@ const buildFinishedGoodAdjustmentMap = async () => {
     for (let from = 0; ; from += pageSize) {
       const { data, error } = await supabase
         .from('stock_adjustment')
-        .select('firm_name, item_name, qty, status, material_type')
+        .select('firm_name, item_name, qty, status, material_type, entry_date')
         .eq('material_type', 'finish_good')
         .range(from, from + pageSize - 1);
 
@@ -564,7 +621,18 @@ const buildFinishedGoodAdjustmentMap = async () => {
         if (!firmKey || !productKey || !Number.isFinite(qty)) return;
 
         const key = `${firmKey}::${productKey}`;
-        adjustmentMap[key] = (adjustmentMap[key] || 0) + (row.status === 'Factory -' ? -qty : qty);
+        if (!adjustmentMap[key]) {
+          adjustmentMap[key] = { before: 0, after: 0, total: 0 };
+        }
+
+        const value = row.status === 'Factory -' ? -qty : qty;
+        const rowDate = getLocalDateString(row.entry_date);
+        adjustmentMap[key].total += value;
+        if (selectedDate && rowDate && rowDate > selectedDate) {
+          adjustmentMap[key].after += value;
+        } else {
+          adjustmentMap[key].before += value;
+        }
       });
 
       if (!data || data.length < pageSize) break;
@@ -899,15 +967,15 @@ export const apiService = {
   },
 
   // Finish Good Inventory — each branch has its own table & schema
-  getFinishGoodInventory: async (branch) => {
+  getFinishGoodInventory: async (branch, selectedDate = '') => {
     try {
       const b = branch ? branch.toLowerCase().trim() : '';
-      const productionMapPromise = buildFinishedGoodProductionMap();
-      const dispatchMapPromise = buildFinishedGoodDispatchMap();
+      const productionMapPromise = buildFinishedGoodProductionMap(selectedDate);
+      const dispatchMapPromise = buildFinishedGoodDispatchMap(selectedDate);
       const pendingOrderMapPromise = buildFinishedGoodPendingOrderMap();
-      const purchaseMapPromise = buildFinishedGoodPurchaseMap();
-      const returnMapPromise = buildFinishedGoodReturnMap();
-      const adjustmentMapPromise = buildFinishedGoodAdjustmentMap();
+      const purchaseMapPromise = buildFinishedGoodPurchaseMap(selectedDate);
+      const returnMapPromise = buildFinishedGoodReturnMap(selectedDate);
+      const adjustmentMapPromise = buildFinishedGoodAdjustmentMap(selectedDate);
       let query = supabase
         .from('finished_goods_inventory_master')
         .select('*')
@@ -930,16 +998,38 @@ export const apiService = {
       return (data || [])
         .map((item) => {
           const key = `${normalizeFirmKey(item.firm_name)}::${normalizeItemKey(item.product_name)}`;
-          const productionQuantity = productionMap[key];
-          const dispatchQuantity = dispatchMap[key];
+          
+          let productionQuantity, dispatchQuantity, purchaseQuantity, returnQuantity, adjustmentQuantity;
+          let opStockAtDate = numberOrZero(item.op_stock);
+
+          if (selectedDate) {
+            productionQuantity = productionMap[key]?.after || 0;
+            dispatchQuantity = dispatchMap[key]?.after || 0;
+            purchaseQuantity = purchaseMap[key]?.after || 0;
+            returnQuantity = returnMap[key]?.after || 0;
+            adjustmentQuantity = adjustmentMap[key]?.after || 0;
+
+            const prodBefore = productionMap[key]?.before || 0;
+            const dispBefore = dispatchMap[key]?.before || 0;
+            const purchBefore = purchaseMap[key]?.before || 0;
+            const retBefore = returnMap[key]?.before || 0;
+            const adjBefore = adjustmentMap[key]?.before || 0;
+
+            opStockAtDate = opStockAtDate + purchBefore + prodBefore + adjBefore - dispBefore + retBefore;
+          } else {
+            productionQuantity = productionMap[key]?.total || 0;
+            dispatchQuantity = dispatchMap[key]?.total || 0;
+            purchaseQuantity = purchaseMap[key]?.total || 0;
+            returnQuantity = returnMap[key]?.total || 0;
+            adjustmentQuantity = adjustmentMap[key]?.total || 0;
+          }
+
           const pendingOrderQuantity = pendingOrderMap[key];
-          const purchaseQuantity = purchaseMap[key];
-          const returnQuantity = returnMap[key];
-          const adjustmentQuantity = adjustmentMap[key];
           const hasCurrentLevelSync = productionQuantity !== undefined || dispatchQuantity !== undefined || purchaseQuantity !== undefined || returnQuantity !== undefined || adjustmentQuantity !== undefined;
 
           return {
             ...item,
+            op_stock: selectedDate ? opStockAtDate : item.op_stock,
             stock_adjustment: adjustmentQuantity !== undefined ? adjustmentQuantity : item.stock_adjustment,
             sales_order_pending: pendingOrderQuantity !== undefined ? pendingOrderQuantity : item.sales_order_pending,
             purchase_material_received: purchaseQuantity !== undefined ? purchaseQuantity : item.purchase_material_received,
@@ -947,7 +1037,7 @@ export const apiService = {
             sales: dispatchQuantity !== undefined ? dispatchQuantity : item.sales,
             sales_return: returnQuantity !== undefined ? returnQuantity : item.sales_return,
             current_level: hasCurrentLevelSync
-              ? numberOrZero(purchaseQuantity) + numberOrZero(productionQuantity) + numberOrZero(adjustmentQuantity) - numberOrZero(dispatchQuantity) + numberOrZero(returnQuantity)
+              ? opStockAtDate + purchaseQuantity + productionQuantity + adjustmentQuantity - dispatchQuantity + returnQuantity
               : item.current_level,
             _hasCurrentLevelSync: hasCurrentLevelSync
           };

@@ -359,7 +359,7 @@ const Crushing = () => {
         
         {/* History Table */}
         <div className="lg:col-span-2">
-          <GlassCard className="p-6">
+          <GlassCard className="p-2 sm:p-6">
             <Table
               columns={columns}
               data={crushingHistory}

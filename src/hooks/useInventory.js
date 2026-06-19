@@ -9,11 +9,11 @@ export const useInventory = () => {
   const { showSuccess, showError } = useToast();
   const { user } = useAuth();
 
-  const fetchInventory = useCallback(async (branch, type = 'raw_material') => {
+  const fetchInventory = useCallback(async (branch, type = 'raw_material', dateFilter = '') => {
     setLoading(true);
     try {
       const data = type === 'finish_good'
-        ? await apiService.getFinishGoodInventory(branch)
+        ? await apiService.getFinishGoodInventory(branch, dateFilter)
         : await apiService.getInventory(branch);
       setInventoryItems(data);
     } catch (e) {

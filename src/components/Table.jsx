@@ -190,7 +190,7 @@ const Table = ({
                 <th
                   key={idx}
                   onClick={() => col.sortable !== false && col.accessor && handleSort(col.accessor)}
-                  className={`px-5 py-3.5 font-semibold sticky top-0 bg-slate-900 z-10 ${
+                  className={`px-2 py-2 sm:px-5 sm:py-3.5 font-semibold sticky top-0 bg-slate-900 z-10 ${
                     col.sortable !== false && col.accessor ? 'cursor-pointer hover:bg-slate-800/40 select-none' : ''
                   }`}
                 >
@@ -224,8 +224,8 @@ const Table = ({
                   className="hover:bg-slate-800/10 transition-colors duration-150"
                 >
                   {columns.map((col, cIdx) => (
-                    <td key={cIdx} className="px-5 py-3.5 whitespace-nowrap">
-                      {col.render ? col.render(row) : (typeof col.accessor === 'function' ? col.accessor(row) : row[col.accessor])}
+                    <td key={cIdx} className="px-2 py-2 sm:px-5 sm:py-3.5 whitespace-nowrap">
+                      {col.render ? col.render(row, (currentPage - 1) * pageSize + rIdx) : (typeof col.accessor === 'function' ? col.accessor(row) : row[col.accessor])}
                     </td>
                   ))}
                 </tr>

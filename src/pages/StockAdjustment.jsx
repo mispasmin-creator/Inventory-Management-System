@@ -340,7 +340,7 @@ const StockAdjustment = () => {
         </div>
       </div>
 
-      <GlassCard className="p-6">
+      <GlassCard className="p-2 sm:p-6">
         <h3 className="text-sm font-bold text-slate-100 mb-4">Stock Adjustment Entries</h3>
         {loading ? (
           <div className="py-12 text-center text-sm text-slate-400">

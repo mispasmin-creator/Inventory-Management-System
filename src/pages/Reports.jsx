@@ -242,7 +242,7 @@ const Reports = () => {
       </div>
 
       {/* Config Filters Panel */}
-      <GlassCard className="p-5 noprint border border-slate-850">
+      <GlassCard className="p-2.5 sm:p-5 noprint border border-slate-850">
         
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-4 items-end text-xs">
           
@@ -372,7 +372,7 @@ const Reports = () => {
           </div>
 
           {/* Printable Report Grid */}
-          <GlassCard className="p-6">
+          <GlassCard className="p-2 sm:p-6">
             <Table
               columns={getColumns()}
               data={reportData}
