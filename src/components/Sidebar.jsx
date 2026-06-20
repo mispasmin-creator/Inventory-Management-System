@@ -198,29 +198,28 @@ const Sidebar = () => {
                 display: 'flex',
                 alignItems: 'center',
                 gap: '10px',
-                padding: isCollapsed ? '10px' : '9px 10px',
-                borderRadius: '8px',
+                padding: isCollapsed ? '10px' : '10px 14px',
+                borderRadius: '10px',
                 fontSize: '0.8125rem',
-                fontWeight: isActive ? 600 : 400,
-                color: isActive ? 'var(--brand-green-dark)' : 'var(--ink-muted)',
-                background: isActive ? 'var(--brand-green-soft)' : 'transparent',
-                borderLeft: isActive ? '3px solid var(--brand-green)' : '3px solid transparent',
+                fontWeight: isActive ? 600 : 500,
+                color: isActive ? '#ffffff' : 'var(--ink-muted)',
+                background: isActive ? 'var(--brand-green)' : 'transparent',
                 textDecoration: 'none',
-                transition: 'all 0.15s ease',
+                transition: 'all 0.2s ease',
                 justifyContent: isCollapsed ? 'center' : 'flex-start',
                 position: 'relative',
                 zIndex: 1,
               })}
               onMouseEnter={(e) => {
-                const active = e.currentTarget.style.background !== 'transparent' && e.currentTarget.style.background !== '';
-                if (!active) {
-                  e.currentTarget.style.background = 'var(--surface-mid)';
-                  e.currentTarget.style.color = 'var(--ink)';
+                const isActive = e.currentTarget.getAttribute('aria-current') === 'page';
+                if (!isActive) {
+                  e.currentTarget.style.background = 'var(--brand-green-soft)';
+                  e.currentTarget.style.color = 'var(--brand-green-dark)';
                 }
               }}
               onMouseLeave={(e) => {
-                const isActiveEl = e.currentTarget.getAttribute('aria-current') === 'page';
-                if (!isActiveEl) {
+                const isActive = e.currentTarget.getAttribute('aria-current') === 'page';
+                if (!isActive) {
                   e.currentTarget.style.background = 'transparent';
                   e.currentTarget.style.color = 'var(--ink-muted)';
                 }
@@ -236,10 +235,10 @@ const Sidebar = () => {
       {/* ── User Footer ──────────────────────────── */}
       <div style={{
         borderTop: '1px solid var(--line)',
-        padding: '12px 10px',
+        padding: '16px 14px',
         display: 'flex',
         flexDirection: 'column',
-        gap: '4px',
+        gap: '6px',
         position: 'relative',
         zIndex: 1,
       }}>
@@ -248,25 +247,25 @@ const Sidebar = () => {
             display: 'flex',
             alignItems: 'center',
             gap: '10px',
-            padding: '8px 10px',
-            borderRadius: '8px',
+            padding: '10px 12px',
+            borderRadius: '12px',
             background: 'var(--surface-soft)',
             border: '1px solid var(--line)',
             marginBottom: '4px',
           }}>
             <div style={{
-              width: '30px', height: '30px', borderRadius: '7px',
+              width: '32px', height: '32px', borderRadius: '8px',
               background: 'var(--brand-green)',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
-              color: '#fff', fontWeight: 700, fontSize: '0.7rem', flexShrink: 0,
+              color: '#fff', fontWeight: 700, fontSize: '0.75rem', flexShrink: 0,
             }}>
               {userInitials}
             </div>
             <div style={{ overflow: 'hidden' }}>
-              <div style={{ fontSize: '0.78rem', fontWeight: 600, color: 'var(--ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              <div style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--ink)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                 {user.name || user.username}
               </div>
-              <div style={{ fontSize: '0.65rem', color: 'var(--ink-faint)', marginTop: '1px' }}>
+              <div style={{ fontSize: '0.68rem', color: 'var(--ink-faint)', marginTop: '2px', textTransform: 'uppercase', letterSpacing: '0.03em', fontWeight: 500 }}>
                 {user.role}
               </div>
             </div>

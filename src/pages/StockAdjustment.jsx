@@ -4,6 +4,7 @@ import { useForm } from 'react-hook-form';
 import GlassCard from '../components/GlassCard';
 import Modal from '../components/Modal';
 import Table from '../components/Table';
+import { TableSkeleton } from '../components/Skeleton';
 import { useToast } from '../components/Toast';
 import { supabase } from '../services/supabaseClient';
 
@@ -343,9 +344,7 @@ const StockAdjustment = () => {
       <GlassCard className="p-2 sm:p-6">
         <h3 className="text-sm font-bold text-slate-100 mb-4">Stock Adjustment Entries</h3>
         {loading ? (
-          <div className="py-12 text-center text-sm text-slate-400">
-            Loading stock adjustment entries...
-          </div>
+          <TableSkeleton rows={8} cols={8} />
         ) : (
           <Table
             columns={rawColumns}

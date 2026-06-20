@@ -5,6 +5,7 @@ import { useToast } from '../components/Toast';
 import { useAuth } from '../hooks/useAuth';
 import GlassCard from '../components/GlassCard';
 import Table from '../components/Table';
+import { TableSkeleton } from '../components/Skeleton';
 import { ShoppingCart, Calendar, FileText, Plus, Landmark, Calculator } from 'lucide-react';
 
 const Purchase = () => {
@@ -350,15 +351,19 @@ const Purchase = () => {
 
       {/* History Ledger Table */}
       <GlassCard className="p-2 sm:p-6">
-        <Table
-          columns={columns}
-          data={purchaseHistory}
-          searchPlaceholder="Search invoices, vendors, items..."
-          filterKey="branch"
-          filterOptions={['Main', 'Madhya', 'Rkl', 'Purab']}
-          filterPlaceholder="Filter Branch"
-          exportFileName="Purchase_ledger"
-        />
+        {loading ? (
+          <TableSkeleton rows={10} cols={10} />
+        ) : (
+          <Table
+            columns={columns}
+            data={purchaseHistory}
+            searchPlaceholder="Search invoices, vendors, items..."
+            filterKey="branch"
+            filterOptions={['Main', 'Madhya', 'Rkl', 'Purab']}
+            filterPlaceholder="Filter Branch"
+            exportFileName="Purchase_ledger"
+          />
+        )}
       </GlassCard>
 
     </div>

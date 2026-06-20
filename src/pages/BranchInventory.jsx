@@ -7,6 +7,7 @@ import { supabase } from '../services/supabaseClient';
 import Table from '../components/Table';
 import Modal from '../components/Modal';
 import GlassCard from '../components/GlassCard';
+import { TableSkeleton } from '../components/Skeleton';
 import { useToast } from '../components/Toast';
 import { useForm, useWatch } from 'react-hook-form';
 import { 
@@ -615,15 +616,20 @@ const BranchInventory = () => {
       {/* Main Tab Renderings */}
       <GlassCard className="p-2 sm:p-6">
         {hasInventoryAccess ? (
-          <Table
-            columns={inventoryColumns}
-            data={displayedInventoryItems}
-            searchPlaceholder="Search materials by name or colour..."
-            filterKey="colour"
-            filterOptions={['Low', 'Optimum', 'Extra']}
-            filterPlaceholder="Filter Status"
-            exportFileName={`${activeBranch}_${type}_inventory`}
-          />
+          loading ? (
+            <TableSkeleton rows={10} cols={isFinishGood ? 12 : 15} />
+          ) : (
+            <Table
+              columns={inventoryColumns}
+              data={displayedInventoryItems}
+              searchPlaceholder="Search materials by name or colour..."
+              filterKey="colour"
+              filterOptions={['Low', 'Optimum', 'Extra']}
+              filterPlaceholder="Filter Status"
+              exportFileName={`${activeBranch}_${type}_inventory`}
+              disableSorting={true}
+            />
+          )
         ) : (
           <div className="py-12 text-center text-sm text-slate-400">
             You do not have access to any firm for this inventory type.

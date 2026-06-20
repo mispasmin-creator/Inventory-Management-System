@@ -16,7 +16,108 @@
   --surface-soft: #f8faf7;
   --surface-mid: #f1f5f0;
   --sidebar-w: 256px;
+
+  /* Accent Card Tints & Text colors adapted to Brand theme */
+  --card-bg-1: #eef7f2;
+  --card-bg-2: #f0f4ff;
+  --card-bg-3: #fff2ed;
+  --card-bg-4: #fffbeb;
+  --card-text-1: #1e6b45;
+  --card-text-2: #4f46e5;
+  --card-text-3: #ea580c;
+  --card-text-4: #d97706;
+
+  /* Theme-aware Chart variables */
+  --chart-green: #10b981;
+  --chart-red: #ef4444;
+  --chart-blue: #4f46e5;
+  --chart-amber: #f59e0b;
+  --chart-purple: #a855f7;
 }
+
+/* ── Dark Mode Theme Variables ───────────────────────────── */
+html.dark {
+  --ink: #f3f4f6;
+  --ink-muted: #9ca3af;
+  --ink-faint: #4b5563;
+  --line: #2e382d;
+  --line-soft: #232c22;
+  --surface: #121812;
+  --surface-soft: #0a0d0a;
+  --surface-mid: #171f17;
+  --brand-green-soft: #12311f;
+  --brand-green-hover: #18432a;
+  --brand-green: #25824f;
+  --brand-green-mid: #2eb46c;
+  --brand-green-dark: #eef7f2;
+
+  --card-bg-1: #0d2116;
+  --card-bg-2: #111625;
+  --card-bg-3: #251713;
+  --card-bg-4: #251c11;
+  --card-text-1: #56d092;
+  --card-text-2: #818cf8;
+  --card-text-3: #f97316;
+  --card-text-4: #fbbf24;
+
+  --chart-green: #34d399;
+  --chart-red: #f87171;
+  --chart-blue: #818cf8;
+  --chart-amber: #fbbf24;
+  --chart-purple: #c084fc;
+}
+
+/* ── Tailwind utility overrides for dark mode ────────────── */
+html.dark .bg-white {
+  background-color: var(--surface) !important;
+}
+html.dark .bg-slate-50 {
+  background-color: var(--surface-soft) !important;
+}
+html.dark .bg-slate-100 {
+  background-color: var(--surface-mid) !important;
+}
+html.dark .bg-slate-900\/30 {
+  background-color: rgba(22, 31, 22, 0.3) !important;
+}
+html.dark .border-slate-100,
+html.dark .border-slate-200 {
+  border-color: var(--line) !important;
+}
+html.dark .divide-slate-100 > :not([hidden]) ~ :not([hidden]),
+html.dark .divide-slate-200 > :not([hidden]) ~ :not([hidden]) {
+  border-color: var(--line-soft) !important;
+}
+html.dark .text-slate-500,
+html.dark .text-slate-600,
+html.dark .text-slate-700,
+html.dark .text-slate-800,
+html.dark .text-slate-900 {
+  color: var(--ink) !important;
+}
+html.dark .bg-\[\#f7f9f4\] {
+  background-color: var(--surface-soft) !important;
+}
+html.dark select.glass-input {
+  background-color: var(--surface) !important;
+  color: var(--ink) !important;
+  border-color: var(--line) !important;
+}
+html.dark select.glass-input option {
+  background-color: var(--surface) !important;
+  color: var(--ink) !important;
+}
+html.dark input.glass-input {
+  background-color: var(--surface) !important;
+  color: var(--ink) !important;
+  border-color: var(--line) !important;
+}
+html.dark button[class*="bg-slate-800"] {
+  background-color: var(--surface-mid) !important;
+  color: var(--ink) !important;
+  border-color: var(--line) !important;
+}
+
 
 /* ── Global Reset ─────────────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; }
@@ -214,6 +315,7 @@ thead [class*="bg-slate-900"] {
   letter-spacing: 0.06em !important;
   font-weight: 600 !important;
   text-transform: uppercase !important;
+  border-bottom: 2px solid var(--line) !important;
 }
 tbody tr {
   border-bottom: 1px solid var(--line-soft) !important;
@@ -221,6 +323,9 @@ tbody tr {
 }
 tbody tr:hover {
   background-color: var(--brand-green-soft) !important;
+}
+tbody tr:last-child {
+  border-bottom: none !important;
 }
 
 /* ── Select/Option ───────────────────────────────────────── */

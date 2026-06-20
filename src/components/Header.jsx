@@ -6,6 +6,11 @@ import {
   User,
   ChevronDown,
   LogOut,
+  Calendar,
+  Search,
+  Bell,
+  Sun,
+  Moon,
 } from "lucide-react";
 import { useAuth } from "../hooks/useAuth";
 import { motion, AnimatePresence } from "framer-motion";
@@ -18,6 +23,24 @@ const Header = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const dropdownRef = useRef(null);
+
+  // Theme support
+  const [theme, setTheme] = useState(() => localStorage.getItem("theme") || "light");
+
+  useEffect(() => {
+    if (theme === "dark") {
+      document.documentElement.classList.add("dark");
+      document.documentElement.setAttribute("data-theme", "dark");
+    } else {
+      document.documentElement.classList.remove("dark");
+      document.documentElement.setAttribute("data-theme", "light");
+    }
+    localStorage.setItem("theme", theme);
+  }, [theme]);
+
+  const toggleTheme = () => {
+    setTheme((prev) => (prev === "light" ? "dark" : "light"));
+  };
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -77,51 +100,133 @@ const Header = () => {
     setTimeout(() => setRefreshing(false), 2000);
   };
 
+  const formattedDate = new Date().toLocaleDateString("en-US", {
+    month: "long",
+    day: "numeric",
+    year: "numeric"
+  });
+
   return (
     <header
-      className="glass-header shrink-0 z-30 select-none"
+      className="glass-header shrink-0 z-30 select-none transition-colors duration-200"
       style={{
-        height: '64px',
+        height: '76px',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
         padding: '0 28px',
+        background: 'var(--surface)',
+        borderBottom: '1px solid var(--line)',
       }}
     >
-      {/* ── Left: Page Title ──────────────────── */}
+      {/* ── Left: Date Display & Page Title ──────────────────── */}
       <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '3px' }}>
+          <Calendar className="w-3.5 h-3.5 text-(--brand-green) shrink-0" />
+          <span style={{ fontSize: '0.72rem', fontWeight: 500, color: 'var(--ink-muted)' }}>{formattedDate}</span>
+        </div>
         <h1
-          className="hidden md:block"
           style={{
-            fontSize: '0.9375rem',
-            fontWeight: 600,
+            fontSize: '1.2rem',
+            fontWeight: 700,
             color: 'var(--ink)',
             margin: 0,
             lineHeight: 1.2,
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px'
           }}
         >
           {getPageTitle()}
+          {/* {getPageTitle() === 'Dashboard' && <span role="img" aria-label="emoji">😍</span>} */}
         </h1>
-        {getBreadcrumb() && (
-          <span
-            className="hidden md:block"
-            style={{
-              fontSize: '0.68rem',
-              color: 'var(--ink-faint)',
-              marginTop: '2px',
-              letterSpacing: '0.01em',
-            }}
-          >
-            {getBreadcrumb()}
-          </span>
-        )}
       </div>
+
+      {/* ── Center: Search Input Mockup (Adapted from image) ───────────────── */}
+      {/* <div className="relative hidden lg:block w-72">
+        <input
+          type="text"
+          placeholder="Search by date, name or ID..."
+          disabled
+          style={{
+            width: '100%',
+            padding: '7px 40px 7px 16px',
+            fontSize: '0.75rem',
+            borderRadius: '9999px',
+            border: '1px solid var(--line)',
+            background: 'var(--surface-soft)',
+            color: 'var(--ink)',
+            outline: 'none',
+            cursor: 'not-allowed',
+          }}
+        />
+        <Search className="absolute right-3.5 top-2.5 w-3.5 h-3.5 text-(--ink-faint)" />
+      </div> */}
 
       {/* ── Right: Actions ───────────────────── */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
 
-        {/* Refresh Button */}
+        {/* Notification Bell Button */}
+        {/* <button
+          title="Notifications"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: '36px',
+            height: '36px',
+            borderRadius: '8px',
+            border: '1px solid var(--line)',
+            background: 'var(--surface-soft)',
+            color: 'var(--ink-muted)',
+            cursor: 'pointer',
+            transition: 'all 0.15s',
+            position: 'relative',
+          }}
+          onMouseEnter={e => {
+            e.currentTarget.style.background = 'var(--surface-mid)';
+            e.currentTarget.style.color = 'var(--ink)';
+          }}
+          onMouseLeave={e => {
+            e.currentTarget.style.background = 'var(--surface-soft)';
+            e.currentTarget.style.color = 'var(--ink-muted)';
+          }}
+        >
+          <Bell style={{ width: '15px', height: '15px' }} />
+          <span style={{ position: 'absolute', top: '8px', right: '8px', width: '6px', height: '6px', background: '#e11d48', borderRadius: '50%' }} />
+        </button> */}
+
+        {/* Theme Toggle Button */}
         <button
+          onClick={toggleTheme}
+          title={theme === 'light' ? 'Switch to Dark Mode' : 'Switch to Light Mode'}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: '36px',
+            height: '36px',
+            borderRadius: '8px',
+            border: '1px solid var(--line)',
+            background: 'var(--surface-soft)',
+            color: 'var(--ink-muted)',
+            cursor: 'pointer',
+            transition: 'all 0.15s',
+          }}
+          onMouseEnter={e => {
+            e.currentTarget.style.background = 'var(--surface-mid)';
+            e.currentTarget.style.color = 'var(--ink)';
+          }}
+          onMouseLeave={e => {
+            e.currentTarget.style.background = 'var(--surface-soft)';
+            e.currentTarget.style.color = 'var(--ink-muted)';
+          }}
+        >
+          {theme === "light" ? <Moon style={{ width: '15px', height: '15px' }} /> : <Sun style={{ width: '15px', height: '15px' }} />}
+        </button>
+
+        {/* Refresh Button */}
+        {/* <button
           onClick={handleRefresh}
           title="Refresh Data"
           style={{
@@ -153,10 +258,11 @@ const Header = () => {
               animation: refreshing ? 'spin 0.8s linear infinite' : 'none',
             }}
           />
-        </button>
+        </button> */}
 
         {/* Divider */}
         <div style={{ width: '1px', height: '24px', background: 'var(--line)' }} />
+
 
         {/* Profile Dropdown */}
         <div ref={dropdownRef} style={{ position: 'relative' }}>

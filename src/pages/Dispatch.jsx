@@ -5,6 +5,7 @@ import { useToast } from '../components/Toast';
 import { useAuth } from '../hooks/useAuth';
 import GlassCard from '../components/GlassCard';
 import Table from '../components/Table';
+import { TableSkeleton } from '../components/Skeleton';
 import Modal from '../components/Modal';
 import { Send, FileText, Plus, ShoppingBag, ShieldAlert, Receipt, Printer } from 'lucide-react';
 
@@ -394,15 +395,19 @@ const Dispatch = () => {
 
       {/* History Grid */}
       <GlassCard className="p-2 sm:p-6">
-        <Table
-          columns={columns}
-          data={dispatchHistory}
-          searchPlaceholder="Search invoices, customers, items..."
-          filterKey="branch"
-          filterOptions={['Main', 'Madhya', 'Rkl', 'Purab']}
-          filterPlaceholder="Filter Source Branch"
-          exportFileName="Dispatch_ledger"
-        />
+        {loading ? (
+          <TableSkeleton rows={10} cols={9} />
+        ) : (
+          <Table
+            columns={columns}
+            data={dispatchHistory}
+            searchPlaceholder="Search invoices, customers, items..."
+            filterKey="branch"
+            filterOptions={['Main', 'Madhya', 'Rkl', 'Purab']}
+            filterPlaceholder="Filter Source Branch"
+            exportFileName="Dispatch_ledger"
+          />
+        )}
       </GlassCard>
 
       {/* INVOICE PREVIEW MODAL */}

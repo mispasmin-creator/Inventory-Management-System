@@ -4,6 +4,7 @@ import { useToast } from '../components/Toast';
 import { useAuth } from '../hooks/useAuth';
 import GlassCard from '../components/GlassCard';
 import Modal from '../components/Modal';
+import { CardSkeleton } from '../components/Skeleton';
 import { IndianRupee, Edit3, Clock, LineChart as LineIcon, Calendar, TrendingUp } from 'lucide-react';
 import { 
   LineChart, 
@@ -93,8 +94,13 @@ const PmmplRate = () => {
 
       {/* Loading Indicator */}
       {loading && rates.length === 0 ? (
-        <div className="flex justify-center py-12">
-          <div className="w-8 h-8 border-2 border-indigo-500/25 border-t-indigo-500 rounded-full animate-spin" />
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          <CardSkeleton />
+          <CardSkeleton />
+          <CardSkeleton />
+          <CardSkeleton />
+          <CardSkeleton />
+          <CardSkeleton />
         </div>
       ) : (
         /* Rates Cards Grid */

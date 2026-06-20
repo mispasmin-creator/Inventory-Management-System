@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../hooks/useAuth';
 import { apiService } from '../services/api';
 import GlassCard from '../components/GlassCard';
+import { DashboardSkeleton } from '../components/Skeleton';
 import { 
   Boxes, 
   AlertTriangle, 
@@ -38,6 +39,13 @@ import {
 
 const Dashboard = () => {
   const { user } = useAuth();
+
+  const getFontSizeClass = (value) => {
+    const str = String(value);
+    if (str.length > 14) return 'text-lg sm:text-xl';
+    if (str.length > 10) return 'text-xl sm:text-2xl';
+    return 'text-2xl';
+  };
   const [activeTab, setActiveTab] = useState('overview');
   const [stats, setStats] = useState({
     totalRawStockTons: 0,
@@ -322,7 +330,7 @@ const Dashboard = () => {
   }, [user]);
 
   // Premium color palettes matching CSS
-  const COLORS = ['#2c6f55', '#4f46e5', '#a855f7', '#06b6d4', '#f59e0b', '#10b981', '#ef4444'];
+  const COLORS = ['var(--brand-green)', 'var(--chart-blue)', 'var(--chart-purple)', '#06b6d4', 'var(--chart-amber)', 'var(--chart-green)', 'var(--chart-red)'];
 
   // Calculate Finished Goods Deficit Alerts
   const fgDeficitAlerts = fgInventory
@@ -336,11 +344,8 @@ const Dashboard = () => {
 
   if (loading) {
     return (
-      <div className="flex h-[75vh] items-center justify-center">
-        <div className="flex flex-col items-center gap-3">
-          <div className="w-10 h-10 border-4 border-emerald-500/20 border-t-emerald-600 rounded-full animate-spin" />
-          <p className="text-xs text-slate-500">Loading live data, metrics and logs...</p>
-        </div>
+      <div className="max-w-7xl mx-auto p-1.5">
+        <DashboardSkeleton />
       </div>
     );
   }
@@ -383,57 +388,57 @@ const Dashboard = () => {
         <div className="space-y-6 animate-fade-in">
           {/* Overview KPIs */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            <GlassCard className="flex items-center gap-4 hover" hover glow>
-              <div className="w-12 h-12 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-600">
-                <Boxes className="w-6 h-6" />
+            <div style={{ background: 'var(--card-bg-1)' }} className="rounded-2xl p-5 border border-(--line) shadow-sm flex flex-col justify-between transition-all duration-300 hover:scale-[1.01]">
+              <p className="text-slate-500 text-[11px] font-bold uppercase tracking-wider">Total Aggregates Stock</p>
+              <div className="flex items-center gap-3 mt-4 flex-wrap">
+                <span style={{ color: 'var(--card-text-1)' }} className={`font-extrabold tracking-tight ${getFontSizeClass((stats.totalRawStockTons + stats.totalFGStockTons).toLocaleString())}`}>
+                  {(stats.totalRawStockTons + stats.totalFGStockTons).toLocaleString()}
+                </span>
+                <div className="flex items-center gap-3 shrink-0">
+                  <span className="text-slate-300 text-lg font-light">|</span>
+                  <span className="text-xs font-semibold text-slate-500">Live Inventory (Tons)</span>
+                </div>
               </div>
-              <div>
-                <p className="text-slate-500 text-[10px] font-bold uppercase tracking-wider">Total Aggregates Stock</p>
-                <h3 className="text-xl font-bold mt-0.5 text-slate-800">
-                  {(stats.totalRawStockTons + stats.totalFGStockTons).toLocaleString()} <span className="text-xs font-semibold text-slate-400">Tons</span>
-                </h3>
-              </div>
-            </GlassCard>
+            </div>
 
-            <GlassCard className="flex items-center gap-4 hover" hover>
-              <div className="w-12 h-12 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-600">
-                <DollarSign className="w-6 h-6" />
-              </div>
-              <div>
-                <p className="text-slate-500 text-[10px] font-bold uppercase tracking-wider">Raw Mat. Valuation</p>
-                <h3 className="text-xl font-bold mt-0.5 text-slate-800">
+            <div style={{ background: 'var(--card-bg-2)' }} className="rounded-2xl p-5 border border-(--line) shadow-sm flex flex-col justify-between transition-all duration-300 hover:scale-[1.01]">
+              <p className="text-slate-500 text-[11px] font-bold uppercase tracking-wider">Raw Mat. Valuation</p>
+              <div className="flex items-center gap-3 mt-4 flex-wrap">
+                <span style={{ color: 'var(--card-text-2)' }} className={`font-extrabold tracking-tight ${getFontSizeClass(`₹${stats.rawValuation.toLocaleString('en-IN')}`)}`}>
                   ₹{stats.rawValuation.toLocaleString('en-IN')}
-                </h3>
+                </span>
+                <div className="flex items-center gap-3 shrink-0">
+                  <span className="text-slate-300 text-lg font-light">|</span>
+                  <span className="text-xs font-semibold text-slate-500">Total Assets</span>
+                </div>
               </div>
-            </GlassCard>
+            </div>
 
-            <GlassCard className="flex items-center gap-4 hover" hover>
-              <div className="w-12 h-12 rounded-xl bg-rose-500/10 border border-rose-500/20 flex items-center justify-center text-rose-600">
-                <TrendingDown className="w-6 h-6" />
-              </div>
-              <div>
-                <p className="text-slate-500 text-[10px] font-bold uppercase tracking-wider">Sales Dispatches</p>
-                <h3 className="text-xl font-bold mt-0.5 text-slate-800">
+            <div style={{ background: 'var(--card-bg-3)' }} className="rounded-2xl p-5 border border-(--line) shadow-sm flex flex-col justify-between transition-all duration-300 hover:scale-[1.01]">
+              <p className="text-slate-500 text-[11px] font-bold uppercase tracking-wider">Sales Dispatches</p>
+              <div className="flex items-center gap-3 mt-4 flex-wrap">
+                <span style={{ color: 'var(--card-text-3)' }} className={`font-extrabold tracking-tight ${getFontSizeClass(`₹${stats.dispatchTotal.toLocaleString('en-IN')}`)}`}>
                   ₹{stats.dispatchTotal.toLocaleString('en-IN')}
-                </h3>
+                </span>
+                <div className="flex items-center gap-3 shrink-0">
+                  <span className="text-slate-300 text-lg font-light">|</span>
+                  <span className="text-xs font-semibold text-slate-500">Revenue</span>
+                </div>
               </div>
-            </GlassCard>
+            </div>
 
-            <GlassCard className={`flex items-center gap-4 hover border-l-4 ${totalOverviewAlerts > 0 ? 'border-l-amber-500' : 'border-l-emerald-500'}`} hover>
-              <div className={`w-12 h-12 rounded-xl flex items-center justify-center border ${
-                totalOverviewAlerts > 0 
-                  ? 'bg-amber-950/10 border-amber-500/20 text-amber-600' 
-                  : 'bg-emerald-500/10 border-emerald-500/20 text-emerald-600'
-              }`}>
-                <AlertTriangle className="w-6 h-6" />
+            <div style={{ background: 'var(--card-bg-4)' }} className="rounded-2xl p-5 border border-(--line) shadow-sm flex flex-col justify-between transition-all duration-300 hover:scale-[1.01]">
+              <p className="text-slate-500 text-[11px] font-bold uppercase tracking-wider">Critical Warnings</p>
+              <div className="flex items-center gap-3 mt-4 flex-wrap">
+                <span style={{ color: 'var(--card-text-4)' }} className={`font-extrabold tracking-tight ${getFontSizeClass(totalOverviewAlerts.toLocaleString())}`}>
+                  {totalOverviewAlerts}
+                </span>
+                <div className="flex items-center gap-3 shrink-0">
+                  <span className="text-slate-300 text-lg font-light">|</span>
+                  <span className="text-xs font-semibold text-slate-500">Alerts Active</span>
+                </div>
               </div>
-              <div>
-                <p className="text-slate-500 text-[10px] font-bold uppercase tracking-wider">Critical Warnings</p>
-                <h3 className="text-xl font-bold mt-0.5 text-slate-800">
-                  {totalOverviewAlerts} <span className="text-xs font-semibold text-slate-400">Alerts Active</span>
-                </h3>
-              </div>
-            </GlassCard>
+            </div>
           </div>
 
           {/* Main Charts for Overview */}
@@ -455,12 +460,12 @@ const Dashboard = () => {
                     <AreaChart data={trendData} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
                       <defs>
                         <linearGradient id="colorPurchase" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#10b981" stopOpacity={0.2}/>
-                          <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
+                          <stop offset="5%" stopColor="var(--chart-green)" stopOpacity={0.2}/>
+                          <stop offset="95%" stopColor="var(--chart-green)" stopOpacity={0}/>
                         </linearGradient>
                         <linearGradient id="colorDispatch" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#ef4444" stopOpacity={0.2}/>
-                          <stop offset="95%" stopColor="#ef4444" stopOpacity={0}/>
+                          <stop offset="5%" stopColor="var(--chart-red)" stopOpacity={0.2}/>
+                          <stop offset="95%" stopColor="var(--chart-red)" stopOpacity={0}/>
                         </linearGradient>
                       </defs>
                       <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.05)" />
@@ -468,8 +473,8 @@ const Dashboard = () => {
                       <YAxis stroke="#64748b" fontSize={10} tickLine={false} />
                       <Tooltip formatter={(value) => [`₹${Number(value).toLocaleString('en-IN')}`]} />
                       <Legend iconSize={8} wrapperStyle={{ fontSize: '10px', paddingTop: '10px' }} />
-                      <Area type="monotone" dataKey="Purchase" stroke="#10b981" strokeWidth={2} fillOpacity={1} fill="url(#colorPurchase)" />
-                      <Area type="monotone" dataKey="Dispatch" stroke="#ef4444" strokeWidth={2} fillOpacity={1} fill="url(#colorDispatch)" />
+                      <Area type="monotone" dataKey="Purchase" stroke="var(--chart-green)" strokeWidth={2} fillOpacity={1} fill="url(#colorPurchase)" />
+                      <Area type="monotone" dataKey="Dispatch" stroke="var(--chart-red)" strokeWidth={2} fillOpacity={1} fill="url(#colorDispatch)" />
                     </AreaChart>
                   </ResponsiveContainer>
                 </div>
@@ -492,8 +497,8 @@ const Dashboard = () => {
                       <YAxis stroke="#64748b" fontSize={10} />
                       <Tooltip formatter={(value) => [`${value} Tons`]} />
                       <Legend iconSize={8} wrapperStyle={{ fontSize: '10px' }} />
-                      <Bar dataKey="Raw Material" fill="#2c6f55" stackId="a" />
-                      <Bar dataKey="Finished Good" fill="#4f46e5" stackId="a" />
+                      <Bar dataKey="Raw Material" fill="var(--brand-green)" stackId="a" />
+                      <Bar dataKey="Finished Good" fill="var(--chart-blue)" stackId="a" />
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
@@ -569,57 +574,57 @@ const Dashboard = () => {
         <div className="space-y-6 animate-fade-in">
           {/* Raw Materials KPIs */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            <GlassCard className="flex items-center gap-4 hover" hover glow>
-              <div className="w-12 h-12 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-600">
-                <Database className="w-6 h-6" />
+            <div style={{ background: 'var(--card-bg-1)' }} className="rounded-2xl p-5 border border-(--line) shadow-sm flex flex-col justify-between transition-all duration-300 hover:scale-[1.01]">
+              <p className="text-slate-500 text-[11px] font-bold uppercase tracking-wider">Total Raw Materials</p>
+              <div className="flex items-center gap-3 mt-4 flex-wrap">
+                <span style={{ color: 'var(--card-text-1)' }} className={`font-extrabold tracking-tight ${getFontSizeClass(stats.totalRawStockTons.toLocaleString())}`}>
+                  {stats.totalRawStockTons.toLocaleString()}
+                </span>
+                <div className="flex items-center gap-3 shrink-0">
+                  <span className="text-slate-300 text-lg font-light">|</span>
+                  <span className="text-xs font-semibold text-slate-500">Tons Stock</span>
+                </div>
               </div>
-              <div>
-                <p className="text-slate-500 text-[10px] font-bold uppercase tracking-wider">Total Raw Materials</p>
-                <h3 className="text-xl font-bold mt-0.5 text-slate-800">
-                  {stats.totalRawStockTons.toLocaleString()} <span className="text-xs font-semibold text-slate-400">Tons</span>
-                </h3>
-              </div>
-            </GlassCard>
+            </div>
 
-            <GlassCard className="flex items-center gap-4 hover" hover>
-              <div className="w-12 h-12 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-600">
-                <DollarSign className="w-6 h-6" />
-              </div>
-              <div>
-                <p className="text-slate-500 text-[10px] font-bold uppercase tracking-wider">Inventory Value</p>
-                <h3 className="text-xl font-bold mt-0.5 text-slate-800">
+            <div style={{ background: 'var(--card-bg-2)' }} className="rounded-2xl p-5 border border-(--line) shadow-sm flex flex-col justify-between transition-all duration-300 hover:scale-[1.01]">
+              <p className="text-slate-500 text-[11px] font-bold uppercase tracking-wider">Inventory Value</p>
+              <div className="flex items-center gap-3 mt-4 flex-wrap">
+                <span style={{ color: 'var(--card-text-2)' }} className={`font-extrabold tracking-tight ${getFontSizeClass(`₹${stats.rawValuation.toLocaleString('en-IN')}`)}`}>
                   ₹{stats.rawValuation.toLocaleString('en-IN')}
-                </h3>
+                </span>
+                <div className="flex items-center gap-3 shrink-0">
+                  <span className="text-slate-300 text-lg font-light">|</span>
+                  <span className="text-xs font-semibold text-slate-500">Asset Value</span>
+                </div>
               </div>
-            </GlassCard>
+            </div>
 
-            <GlassCard className="flex items-center gap-4 hover" hover>
-              <div className="w-12 h-12 rounded-xl bg-purple-500/10 border border-purple-500/20 flex items-center justify-center text-purple-600">
-                <ClipboardList className="w-6 h-6" />
+            <div style={{ background: 'var(--card-bg-3)' }} className="rounded-2xl p-5 border border-(--line) shadow-sm flex flex-col justify-between transition-all duration-300 hover:scale-[1.01]">
+              <p className="text-slate-500 text-[11px] font-bold uppercase tracking-wider">Active Items Count</p>
+              <div className="flex items-center gap-3 mt-4 flex-wrap">
+                <span style={{ color: 'var(--card-text-3)' }} className={`font-extrabold tracking-tight ${getFontSizeClass(stats.activeRawItemsCount.toLocaleString())}`}>
+                  {stats.activeRawItemsCount}
+                </span>
+                <div className="flex items-center gap-3 shrink-0">
+                  <span className="text-slate-300 text-lg font-light">|</span>
+                  <span className="text-xs font-semibold text-slate-500">Products</span>
+                </div>
               </div>
-              <div>
-                <p className="text-slate-500 text-[10px] font-bold uppercase tracking-wider">Active Items Count</p>
-                <h3 className="text-xl font-bold mt-0.5 text-slate-800">
-                  {stats.activeRawItemsCount} <span className="text-xs font-semibold text-slate-400">Products</span>
-                </h3>
-              </div>
-            </GlassCard>
+            </div>
 
-            <GlassCard className={`flex items-center gap-4 hover border-l-4 ${stats.rawLowStockCount > 0 ? 'border-l-amber-500' : 'border-l-emerald-500'}`} hover>
-              <div className={`w-12 h-12 rounded-xl flex items-center justify-center border ${
-                stats.rawLowStockCount > 0 
-                  ? 'bg-amber-950/10 border-amber-500/20 text-amber-600' 
-                  : 'bg-emerald-500/10 border-emerald-500/20 text-emerald-600'
-              }`}>
-                <AlertTriangle className="w-6 h-6" />
+            <div style={{ background: 'var(--card-bg-4)' }} className="rounded-2xl p-5 border border-(--line) shadow-sm flex flex-col justify-between transition-all duration-300 hover:scale-[1.01]">
+              <p className="text-slate-500 text-[11px] font-bold uppercase tracking-wider">Low Stock Warnings</p>
+              <div className="flex items-center gap-3 mt-4 flex-wrap">
+                <span style={{ color: 'var(--card-text-4)' }} className={`font-extrabold tracking-tight ${getFontSizeClass(stats.rawLowStockCount.toLocaleString())}`}>
+                  {stats.rawLowStockCount}
+                </span>
+                <div className="flex items-center gap-3 shrink-0">
+                  <span className="text-slate-300 text-lg font-light">|</span>
+                  <span className="text-xs font-semibold text-slate-500">Items Low</span>
+                </div>
               </div>
-              <div>
-                <p className="text-slate-500 text-[10px] font-bold uppercase tracking-wider">Low Stock Warnings</p>
-                <h3 className="text-xl font-bold mt-0.5 text-slate-800">
-                  {stats.rawLowStockCount} <span className="text-xs font-semibold text-slate-400">Items Low</span>
-                </h3>
-              </div>
-            </GlassCard>
+            </div>
           </div>
 
           {/* Raw Stock Charts */}
@@ -644,8 +649,8 @@ const Dashboard = () => {
                       <YAxis stroke="#64748b" fontSize={9} />
                       <Tooltip formatter={(value) => [`${value.toLocaleString()} Tons`]} />
                       <Legend iconSize={8} wrapperStyle={{ fontSize: '10px' }} />
-                      <Bar dataKey="Actual" fill="#2c6f55" radius={[4, 4, 0, 0]} />
-                      <Bar dataKey="Optimum" fill="#f59e0b" radius={[4, 4, 0, 0]} />
+                      <Bar dataKey="Actual" fill="var(--brand-green)" radius={[4, 4, 0, 0]} />
+                      <Bar dataKey="Optimum" fill="var(--chart-amber)" radius={[4, 4, 0, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
@@ -730,23 +735,23 @@ const Dashboard = () => {
                   <table className="w-full text-left text-xs border-collapse">
                     <thead>
                       <tr className="bg-slate-50 text-slate-500 uppercase tracking-wider border-b border-slate-200">
-                        <th className="p-2.5 font-bold">Material Name</th>
-                        <th className="p-2.5 font-bold">Branch</th>
-                        <th className="p-2.5 font-bold text-right">Actual Level</th>
-                        <th className="p-2.5 font-bold text-right">Optimum level</th>
-                        <th className="p-2.5 font-bold text-right">Valuation</th>
+                        <th className="px-3 py-1.5 font-bold">Material Name</th>
+                        <th className="px-3 py-1.5 font-bold">Branch</th>
+                        <th className="px-3 py-1.5 font-bold text-right">Actual Level</th>
+                        <th className="px-3 py-1.5 font-bold text-right">Optimum level</th>
+                        <th className="px-3 py-1.5 font-bold text-right">Valuation</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
                       {rawInventory.map((item, idx) => (
                         <tr key={idx} className="hover:bg-slate-50/50">
-                          <td className="p-2.5 font-semibold text-slate-700">{item.itemName}</td>
-                          <td className="p-2.5 text-slate-500">{item.branchName}</td>
-                          <td className={`p-2.5 text-right font-bold ${item.actualLevel <= item.optimumStock ? 'text-amber-600' : 'text-slate-800'}`}>
+                          <td className="px-3 py-1.5 font-semibold text-slate-700">{item.itemName}</td>
+                          <td className="px-3 py-1.5 text-slate-500">{item.branchName}</td>
+                          <td className={`px-3 py-1.5 text-right font-bold ${item.actualLevel <= item.optimumStock ? 'text-amber-600' : 'text-slate-800'}`}>
                             {item.actualLevel.toLocaleString()} {item.unit}
                           </td>
-                          <td className="p-2.5 text-right text-slate-500">{item.optimumStock.toLocaleString()} {item.unit}</td>
-                          <td className="p-2.5 text-right font-semibold text-slate-600">₹{item.valuation.toLocaleString('en-IN')}</td>
+                          <td className="px-3 py-1.5 text-right text-slate-500">{item.optimumStock.toLocaleString()} {item.unit}</td>
+                          <td className="px-3 py-1.5 text-right font-semibold text-slate-600">₹{item.valuation.toLocaleString('en-IN')}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -764,53 +769,57 @@ const Dashboard = () => {
         <div className="space-y-6 animate-fade-in">
           {/* Finished Goods KPIs */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            <GlassCard className="flex items-center gap-4 hover" hover glow>
-              <div className="w-12 h-12 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-600">
-                <Package className="w-6 h-6" />
+            <div style={{ background: 'var(--card-bg-1)' }} className="rounded-2xl p-5 border border-(--line) shadow-sm flex flex-col justify-between transition-all duration-300 hover:scale-[1.01]">
+              <p className="text-slate-500 text-[11px] font-bold uppercase tracking-wider">Total FG Stock</p>
+              <div className="flex items-center gap-3 mt-4 flex-wrap">
+                <span style={{ color: 'var(--card-text-1)' }} className={`font-extrabold tracking-tight ${getFontSizeClass(stats.totalFGStockTons.toLocaleString())}`}>
+                  {stats.totalFGStockTons.toLocaleString()}
+                </span>
+                <div className="flex items-center gap-3 shrink-0">
+                  <span className="text-slate-300 text-lg font-light">|</span>
+                  <span className="text-xs font-semibold text-slate-500">Tons Stock</span>
+                </div>
               </div>
-              <div>
-                <p className="text-slate-500 text-[10px] font-bold uppercase tracking-wider">Total FG Stock</p>
-                <h3 className="text-xl font-bold mt-0.5 text-slate-800">
-                  {stats.totalFGStockTons.toLocaleString()} <span className="text-xs font-semibold text-slate-400">Tons</span>
-                </h3>
-              </div>
-            </GlassCard>
+            </div>
 
-            <GlassCard className="flex items-center gap-4 hover" hover>
-              <div className="w-12 h-12 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-600">
-                <Truck className="w-6 h-6" />
+            <div style={{ background: 'var(--card-bg-2)' }} className="rounded-2xl p-5 border border-(--line) shadow-sm flex flex-col justify-between transition-all duration-300 hover:scale-[1.01]">
+              <p className="text-slate-500 text-[11px] font-bold uppercase tracking-wider">Pending Orders</p>
+              <div className="flex items-center gap-3 mt-4 flex-wrap">
+                <span style={{ color: 'var(--card-text-2)' }} className={`font-extrabold tracking-tight ${getFontSizeClass(stats.fgPendingOrders.toLocaleString())}`}>
+                  {stats.fgPendingOrders.toLocaleString()}
+                </span>
+                <div className="flex items-center gap-3 shrink-0">
+                  <span className="text-slate-300 text-lg font-light">|</span>
+                  <span className="text-xs font-semibold text-slate-500">Tons Pending</span>
+                </div>
               </div>
-              <div>
-                <p className="text-slate-500 text-[10px] font-bold uppercase tracking-wider">Pending Orders</p>
-                <h3 className="text-xl font-bold mt-0.5 text-slate-800">
-                  {stats.fgPendingOrders.toLocaleString()} <span className="text-xs font-semibold text-slate-400">Tons</span>
-                </h3>
-              </div>
-            </GlassCard>
+            </div>
 
-            <GlassCard className="flex items-center gap-4 hover" hover>
-              <div className="w-12 h-12 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-600">
-                <TrendingUp className="w-6 h-6" />
+            <div style={{ background: 'var(--card-bg-3)' }} className="rounded-2xl p-5 border border-(--line) shadow-sm flex flex-col justify-between transition-all duration-300 hover:scale-[1.01]">
+              <p className="text-slate-500 text-[11px] font-bold uppercase tracking-wider">Production Output</p>
+              <div className="flex items-center gap-3 mt-4 flex-wrap">
+                <span style={{ color: 'var(--card-text-3)' }} className={`font-extrabold tracking-tight ${getFontSizeClass(stats.fgProduction.toLocaleString())}`}>
+                  {stats.fgProduction.toLocaleString()}
+                </span>
+                <div className="flex items-center gap-3 shrink-0">
+                  <span className="text-slate-300 text-lg font-light">|</span>
+                  <span className="text-xs font-semibold text-slate-500">Tons Produced</span>
+                </div>
               </div>
-              <div>
-                <p className="text-slate-500 text-[10px] font-bold uppercase tracking-wider">Production Output</p>
-                <h3 className="text-xl font-bold mt-0.5 text-slate-800">
-                  {stats.fgProduction.toLocaleString()} <span className="text-xs font-semibold text-slate-400">Tons</span>
-                </h3>
-              </div>
-            </GlassCard>
+            </div>
 
-            <GlassCard className="flex items-center gap-4 hover" hover>
-              <div className="w-12 h-12 rounded-xl bg-purple-500/10 border border-purple-500/20 flex items-center justify-center text-purple-600">
-                <Layers className="w-6 h-6" />
+            <div style={{ background: 'var(--card-bg-4)' }} className="rounded-2xl p-5 border border-(--line) shadow-sm flex flex-col justify-between transition-all duration-300 hover:scale-[1.01]">
+              <p className="text-slate-500 text-[11px] font-bold uppercase tracking-wider">Fulfill Dispatched</p>
+              <div className="flex items-center gap-3 mt-4 flex-wrap">
+                <span style={{ color: 'var(--card-text-4)' }} className={`font-extrabold tracking-tight ${getFontSizeClass(stats.fgSales.toLocaleString())}`}>
+                  {stats.fgSales.toLocaleString()}
+                </span>
+                <div className="flex items-center gap-3 shrink-0">
+                  <span className="text-slate-300 text-lg font-light">|</span>
+                  <span className="text-xs font-semibold text-slate-500">Tons Dispatched</span>
+                </div>
               </div>
-              <div>
-                <p className="text-slate-500 text-[10px] font-bold uppercase tracking-wider">Fulfill Dispatched</p>
-                <h3 className="text-xl font-bold mt-0.5 text-slate-800">
-                  {stats.fgSales.toLocaleString()} <span className="text-xs font-semibold text-slate-400">Tons</span>
-                </h3>
-              </div>
-            </GlassCard>
+            </div>
           </div>
 
           {/* Finished Goods Charts */}
@@ -835,9 +844,9 @@ const Dashboard = () => {
                       <YAxis stroke="#64748b" fontSize={9} />
                       <Tooltip formatter={(value) => [`${value.toLocaleString()} Tons`]} />
                       <Legend iconSize={8} wrapperStyle={{ fontSize: '10px' }} />
-                      <Bar dataKey="Stock" fill="#4f46e5" name="Stock Level" radius={[4, 4, 0, 0]} />
-                      <Bar dataKey="Sales" fill="#10b981" name="Completed Dispatches" radius={[4, 4, 0, 0]} />
-                      <Bar dataKey="Pending" fill="#ef4444" name="Sales Backlog" radius={[4, 4, 0, 0]} />
+                      <Bar dataKey="Stock" fill="var(--chart-blue)" name="Stock Level" radius={[4, 4, 0, 0]} />
+                      <Bar dataKey="Sales" fill="var(--chart-green)" name="Completed Dispatches" radius={[4, 4, 0, 0]} />
+                      <Bar dataKey="Pending" fill="var(--chart-red)" name="Sales Backlog" radius={[4, 4, 0, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
@@ -920,25 +929,25 @@ const Dashboard = () => {
                   <table className="w-full text-left text-xs border-collapse">
                     <thead>
                       <tr className="bg-slate-50 text-slate-500 uppercase tracking-wider border-b border-slate-200">
-                        <th className="p-2.5 font-bold">Product Name</th>
-                        <th className="p-2.5 font-bold">Branch</th>
-                        <th className="p-2.5 font-bold text-right">Current Level</th>
-                        <th className="p-2.5 font-bold text-right">Production</th>
-                        <th className="p-2.5 font-bold text-right">Pending Sales</th>
-                        <th className="p-2.5 font-bold text-right">Fulfill Status</th>
+                        <th className="px-3 py-1.5 font-bold">Product Name</th>
+                        <th className="px-3 py-1.5 font-bold">Branch</th>
+                        <th className="px-3 py-1.5 font-bold text-right">Current Level</th>
+                        <th className="px-3 py-1.5 font-bold text-right">Production</th>
+                        <th className="px-3 py-1.5 font-bold text-right">Pending Sales</th>
+                        <th className="px-3 py-1.5 font-bold text-right">Fulfill Status</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
                       {fgInventory.map((item, idx) => (
                         <tr key={idx} className="hover:bg-slate-50/50">
-                          <td className="p-2.5 font-semibold text-slate-700">{item.productName}</td>
-                          <td className="p-2.5 text-slate-500">{item.branchName}</td>
-                          <td className={`p-2.5 text-right font-bold ${item.currentLevel < item.salesOrderPending ? 'text-rose-600' : 'text-slate-800'}`}>
+                          <td className="px-3 py-1.5 font-semibold text-slate-700">{item.productName}</td>
+                          <td className="px-3 py-1.5 text-slate-500">{item.branchName}</td>
+                          <td className={`px-3 py-1.5 text-right font-bold ${item.currentLevel < item.salesOrderPending ? 'text-rose-600' : 'text-slate-800'}`}>
                             {item.currentLevel.toLocaleString()} {item.unit}
                           </td>
-                          <td className="p-2.5 text-right text-slate-500">{item.production.toLocaleString()} {item.unit}</td>
-                          <td className="p-2.5 text-right text-slate-500">{item.salesOrderPending.toLocaleString()} {item.unit}</td>
-                          <td className="p-2.5 text-right">
+                          <td className="px-3 py-1.5 text-right text-slate-500">{item.production.toLocaleString()} {item.unit}</td>
+                          <td className="px-3 py-1.5 text-right text-slate-500">{item.salesOrderPending.toLocaleString()} {item.unit}</td>
+                          <td className="px-3 py-1.5 text-right">
                             {item.currentLevel >= item.salesOrderPending ? (
                               <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800">
                                 Safe

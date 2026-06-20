@@ -39,11 +39,11 @@ const ProtectedRoute = ({ children }) => {
 // Layout for Authenticated Pages
 const AppLayout = () => {
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-[#f7f9f4]">
+    <div className="flex h-screen w-screen overflow-hidden bg-(--surface-soft) transition-colors duration-200">
       <Sidebar />
       <div className="flex-1 flex flex-col overflow-hidden">
         <Header />
-        <main className="main-content-area flex-1 overflow-y-auto px-3 py-5 sm:px-6 sm:py-6 scroll-smooth">
+        <main className="main-content-area flex-1 overflow-y-auto px-4 py-6 sm:px-8 sm:py-8 scroll-smooth">
           <Routes>
             <Route path="/" element={<Dashboard />} />
             <Route path="/inventory" element={<BranchInventory />} />

@@ -4,6 +4,7 @@ import { useToast } from '../components/Toast';
 import { useAuth } from '../hooks/useAuth';
 import GlassCard from '../components/GlassCard';
 import Table from '../components/Table';
+import { TableSkeleton } from '../components/Skeleton';
 import { Layers, Plus, Trash2, ShieldAlert, Cpu, BarChart2 } from 'lucide-react';
 import { 
   BarChart, 
@@ -360,12 +361,16 @@ const Crushing = () => {
         {/* History Table */}
         <div className="lg:col-span-2">
           <GlassCard className="p-2 sm:p-6">
-            <Table
-              columns={columns}
-              data={crushingHistory}
-              searchPlaceholder="Search crushing dates, notes..."
-              exportFileName="Crushing_run_logs"
-            />
+            {loading ? (
+              <TableSkeleton rows={8} cols={7} />
+            ) : (
+              <Table
+                columns={columns}
+                data={crushingHistory}
+                searchPlaceholder="Search crushing dates, notes..."
+                exportFileName="Crushing_run_logs"
+              />
+            )}
           </GlassCard>
         </div>
 

@@ -3,6 +3,7 @@ import { useToast } from '../components/Toast';
 import { useAuth } from '../hooks/useAuth';
 import GlassCard from '../components/GlassCard';
 import Modal from '../components/Modal';
+import { TableSkeleton } from '../components/Skeleton';
 import { supabase } from '../services/supabaseClient';
 import {
   Users,
@@ -447,11 +448,9 @@ const Settings = () => {
       </div>
 
       {/* Users Table */}
-      <GlassCard className="p-0 overflow-hidden">
+      <GlassCard className="p-4 overflow-hidden">
         {loading ? (
-          <div className="flex items-center justify-center h-40 text-slate-500 text-sm">
-            Loading users...
-          </div>
+          <TableSkeleton rows={5} cols={5} />
         ) : users.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-40 text-slate-500 text-sm gap-2">
             <Users className="w-8 h-8 opacity-30" />

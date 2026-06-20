@@ -9,7 +9,8 @@ const Table = ({
   filterOptions = [], 
   filterPlaceholder = "All Categories",
   exportFileName = "report",
-  actions = null
+  actions = null,
+  disableSorting = false
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [filterValue, setFilterValue] = useState('');
@@ -186,28 +187,31 @@ const Table = ({
         <table className="w-full border-collapse text-left text-xs text-slate-300">
           <thead className="bg-slate-900 uppercase tracking-wider text-slate-400 border-b border-slate-800 sticky top-0 z-10">
             <tr>
-              {columns.map((col, idx) => (
-                <th
-                  key={idx}
-                  onClick={() => col.sortable !== false && col.accessor && handleSort(col.accessor)}
-                  className={`px-2 py-2 sm:px-5 sm:py-3.5 font-semibold sticky top-0 bg-slate-900 z-10 ${
-                    col.sortable !== false && col.accessor ? 'cursor-pointer hover:bg-slate-800/40 select-none' : ''
-                  }`}
-                >
-                  <div className="flex items-center gap-1.5">
-                    <span>{col.header}</span>
-                    {col.sortable !== false && col.accessor && (
-                      <span className="text-slate-500">
-                        {sortConfig.key === col.accessor ? (
-                          sortConfig.direction === 'asc' ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />
-                        ) : (
-                          <ChevronDown className="w-3 h-3 opacity-25" />
-                        )}
-                      </span>
-                    )}
-                  </div>
-                </th>
-              ))}
+              {columns.map((col, idx) => {
+                const isSortable = !disableSorting && col.sortable !== false && col.accessor;
+                return (
+                  <th
+                    key={idx}
+                    onClick={() => isSortable && handleSort(col.accessor)}
+                    className={`px-3 py-2 sm:px-4 sm:py-2.5 font-semibold sticky top-0 bg-slate-900 z-10 ${
+                      isSortable ? 'cursor-pointer hover:bg-slate-800/40 select-none' : ''
+                    }`}
+                  >
+                    <div className="flex items-center gap-1.5">
+                      <span>{col.header}</span>
+                      {isSortable && (
+                        <span className="text-slate-500">
+                          {sortConfig.key === col.accessor ? (
+                            sortConfig.direction === 'asc' ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />
+                          ) : (
+                            <ChevronDown className="w-3 h-3 opacity-25" />
+                          )}
+                        </span>
+                      )}
+                    </div>
+                  </th>
+                );
+              })}
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-800/60">
@@ -224,7 +228,7 @@ const Table = ({
                   className="hover:bg-slate-800/10 transition-colors duration-150"
                 >
                   {columns.map((col, cIdx) => (
-                    <td key={cIdx} className="px-2 py-2 sm:px-5 sm:py-3.5 whitespace-nowrap">
+                    <td key={cIdx} className="px-3 py-1.5 sm:px-4 sm:py-2 whitespace-nowrap">
                       {col.render ? col.render(row, (currentPage - 1) * pageSize + rIdx) : (typeof col.accessor === 'function' ? col.accessor(row) : row[col.accessor])}
                     </td>
                   ))}
