@@ -1,7 +1,7 @@
 // API Service Layer with Google Apps Script & Mock Fallback
 import axios from 'axios';
 import * as mockDb from './mockData';
-import { orderSupabase, productionSupabase, purchaseSupabase, supabase } from './supabaseClient';
+import { orderSupabase, productionSupabase, purchaseSupabase, salesRawSupabase, supabase } from './supabaseClient';
 
 const APPS_SCRIPT_URL = import.meta.env.VITE_APPS_SCRIPT_URL || '';
 
@@ -886,16 +886,43 @@ export const apiService = {
   // Inventory
   getInventory: async (branch) => {
     try {
-      const [{ data, error }, { actualQuantityMap, ratesMap, annualProductionUsageMap }] = await Promise.all([
+      const [
+        { data, error },
+        { actualQuantityMap, ratesMap, annualProductionUsageMap },
+        salesRawOrdersResult
+      ] = await Promise.all([
         supabase
           .from('inventory_master')
           .select('*')
           .order('firm_name', { ascending: true })
           .order('item_name', { ascending: true }),
-        buildLiftDataMaps()
+        buildLiftDataMaps(),
+        salesRawSupabase
+          .from('orders')
+          .select('qty, product_name, firm_name')
+          .eq('status', 'Completed')
+          .then(res => {
+            if (res.error) throw res.error;
+            return res.data || [];
+          })
+          .catch(err => {
+            console.warn('Failed to fetch Sales of Raw Material orders:', err.message);
+            return [];
+          })
       ]);
 
       if (error) throw error;
+
+      const salesRawQtyMap = {};
+
+      (salesRawOrdersResult || []).forEach(order => {
+        const firmKey = normalizeFirmKey(order.firm_name);
+        const itemKey = normalizeItemKey(order.product_name);
+        if (!firmKey || !itemKey) return;
+
+        const key = `${firmKey}::${itemKey}`;
+        salesRawQtyMap[key] = (salesRawQtyMap[key] || 0) + (Number(order.qty) || 0);
+      });
 
       const normalizedBranch = branch?.toLowerCase().trim();
       const inventoryRows = mergeDuplicateInventoryRows((data || [])
@@ -908,7 +935,13 @@ export const apiService = {
         .map((item, index) => {
           const key = `${normalizeFirmKey(item.firm_name)}::${normalizeItemKey(item.item_name)}`;
           const rate = ratesMap[key] !== undefined ? ratesMap[key] : (item.product_rate ?? '');
-          const actualLevel = actualQuantityMap[key] ?? item.actual_level ?? '';
+
+          let actualLevel = actualQuantityMap[key] ?? item.actual_level ?? '';
+          const salesRawQty = salesRawQtyMap[key] || 0;
+          if (actualLevel !== '' || salesRawQty !== 0) {
+            actualLevel = Number(actualLevel || 0) - salesRawQty;
+          }
+
           const optimumStock = item.optimum_stock ?? item.optimum_qty ?? '';
           const hasProductionUsage = Object.prototype.hasOwnProperty.call(annualProductionUsageMap, key);
           const annualConsumption = hasProductionUsage

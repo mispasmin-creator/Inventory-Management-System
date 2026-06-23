@@ -11,5 +11,5 @@ export default defineConfig({
   optimizeDeps: {
     include: ['react-is']
   },
-  envPrefix: ['VITE_', 'SUPABASE_', 'PURCHASE_', 'PRODUCTION_', 'ORDER_']
+  envPrefix: ['VITE_', 'SUPABASE_', 'PURCHASE_', 'PRODUCTION_', 'ORDER_', 'SALES_OF_RAW_MATERIAL_']
 })
