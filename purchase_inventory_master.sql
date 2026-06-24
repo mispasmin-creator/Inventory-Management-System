@@ -1,4 +1,4 @@
--- Run this in the PURCHASE Supabase project.
+-- Run this in the Supabase project that contains public.inventory_master.
 -- It powers the Raw Material page without changing its existing table headers.
 
 create table if not exists public.inventory_master (
@@ -6,6 +6,8 @@ create table if not exists public.inventory_master (
   firm_name text not null,
   item_name text not null,
   unit text default '',
+  op_stock numeric(14, 3) not null default 0,
+  op_stock_date date,
   actual_level numeric(14, 3) not null default 0,
   product_rate numeric(14, 2) not null default 0,
   annual_consumption numeric(14, 3) not null default 0,
@@ -33,6 +35,10 @@ create table if not exists public.inventory_master (
   updated_at timestamptz not null default timezone('utc', now()),
   unique (firm_name, item_name)
 );
+
+alter table public.inventory_master
+  add column if not exists op_stock numeric(14, 3) not null default 0,
+  add column if not exists op_stock_date date;
 
 create table if not exists public.inventory_movements (
   id bigserial primary key,

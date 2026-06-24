@@ -158,7 +158,7 @@ const normalizeOrderFirmName = (value) => {
   return orderFirmNameMap[firmKey] || value;
 };
 
-const buildProductionUsageMap = async () => {
+const buildProductionUsageMap = async (selectedDate = '') => {
   const pageSize = 1000;
   const usageMap = {};
   const annualUsageMap = {};
@@ -186,6 +186,8 @@ const buildProductionUsageMap = async () => {
 
         const productionDate = parseProductionDate(row);
         const isAnnualConsumption = productionDate !== null && productionDate >= annualCutoff;
+        const productionDateString = getLocalDateString(row['Date Of Production'] || row.Timestamp);
+        const isInSelectedPeriod = !selectedDate || (productionDateString && productionDateString >= selectedDate);
 
         for (let i = 1; i <= 20; i += 1) {
           const itemKey = normalizeItemKey(row[`Raw Material Name ${i}`]);
@@ -196,7 +198,9 @@ const buildProductionUsageMap = async () => {
           if (rawQuantity === null || rawQuantity === '' || !Number.isFinite(quantity)) continue;
 
           const key = `${firmKey}::${itemKey}`;
-          usageMap[key] = (usageMap[key] || 0) + quantity;
+          if (isInSelectedPeriod) {
+            usageMap[key] = (usageMap[key] || 0) + quantity;
+          }
           if (isAnnualConsumption) {
             annualUsageMap[key] = (annualUsageMap[key] || 0) + quantity;
           }
@@ -212,7 +216,7 @@ const buildProductionUsageMap = async () => {
   return { usageMap, annualUsageMap };
 };
 
-const buildSemiFinishedActualLevelMap = async () => {
+const buildSemiFinishedActualLevelMap = async (selectedDate = '') => {
   const pageSize = 1000;
   const productionFirmMap = new Map();
   const semiAdjustmentMap = {};
@@ -238,12 +242,15 @@ const buildSemiFinishedActualLevelMap = async () => {
     for (let from = 0; ; from += pageSize) {
       const { data, error } = await productionSupabase
         .from('semi_actual')
-        .select('id, "S No.", "Semi Finished Production No.", "Product Name", "Qty Of Semi Finished Good"')
+        .select('*')
         .range(from, from + pageSize - 1);
 
       if (error) throw error;
 
       (data || []).forEach((row) => {
+        const rowDate = getLocalDateString(row.Timestamp || row.created_at || row.date);
+        if (selectedDate && (!rowDate || rowDate < selectedDate)) return;
+
         const serialNumber = row['S No.'];
         if (!serialNumber || !String(serialNumber).startsWith('SA-')) return;
 
@@ -275,7 +282,7 @@ const buildSemiFinishedActualLevelMap = async () => {
   return semiAdjustmentMap;
 };
 
-const buildCrushingActualLevelMap = async () => {
+const buildCrushingActualLevelMap = async (selectedDate = '') => {
   const pageSize = 1000;
   const crushingAdjustmentMap = {};
 
@@ -283,13 +290,16 @@ const buildCrushingActualLevelMap = async () => {
     for (let from = 0; ; from += pageSize) {
       const { data, error } = await productionSupabase
         .from('crushing_actual')
-        .select('id, "Firm Name", "Crushing Product Name", "Qty Of Crushing Product"')
+        .select('*')
         .order('id', { ascending: false })
         .range(from, from + pageSize - 1);
 
       if (error) throw error;
 
       (data || []).forEach((row) => {
+        const rowDate = getLocalDateString(row.Timestamp || row.created_at || row.date);
+        if (selectedDate && (!rowDate || rowDate < selectedDate)) return;
+
         const firmKey = normalizeFirmKey(normalizeProductionFirmName(row['Firm Name']));
         const productName = row['Crushing Product Name'];
         const productKey = normalizeItemKey(productName);
@@ -347,7 +357,7 @@ const buildFinishedGoodProductionMap = async (selectedDate = '') => {
 
         const rowDate = getLocalDateString(row.Timestamp);
         productionMap[key].total += quantity;
-        if (selectedDate && rowDate && rowDate > selectedDate) {
+        if (selectedDate && rowDate && rowDate >= selectedDate) {
           productionMap[key].after += quantity;
         } else {
           productionMap[key].before += quantity;
@@ -367,6 +377,7 @@ const buildFinishedGoodDispatchMap = async (selectedDate = '') => {
   const pageSize = 1000;
   const orderMap = new Map();
   const dispatchMap = {};
+  const normalizeJoinId = (value) => String(value ?? '').trim();
 
   try {
     for (let from = 0; ; from += pageSize) {
@@ -378,7 +389,8 @@ const buildFinishedGoodDispatchMap = async (selectedDate = '') => {
       if (error) throw error;
 
       (data || []).forEach((row) => {
-        orderMap.set(row.id, row);
+        const orderId = normalizeJoinId(row.id);
+        if (orderId) orderMap.set(orderId, row);
       });
 
       if (!data || data.length < pageSize) break;
@@ -387,30 +399,38 @@ const buildFinishedGoodDispatchMap = async (selectedDate = '') => {
     for (let from = 0; ; from += pageSize) {
       const { data, error } = await orderSupabase
         .from('DISPATCH')
-        .select('id, po_id, "Product Name", "Qty To Be Dispatched", "Actual Truck Qty", "Fullkitting Actual", "Fullkitting Status", "Actual4"')
+        .select('id, po_id, "Product Name", "Qty To Be Dispatched", "Actual Truck Qty", "Planned4", "Actual4"')
+        .not('Planned4', 'is', null)
         .not('Actual4', 'is', null)
         .range(from, from + pageSize - 1);
 
       if (error) throw error;
 
       (data || []).forEach((row) => {
-        const fullkittingAt = row['Fullkitting Actual'] || '';
-        if (!fullkittingAt || String(fullkittingAt).trim() === '') return;
+        const invoiceActualizedAt = String(row.Actual4 || '').trim();
+        if (!invoiceActualizedAt) return;
 
-        const po = row.po_id ? orderMap.get(row.po_id) || {} : {};
+        const po = orderMap.get(normalizeJoinId(row.po_id)) || {};
         const firmKey = normalizeFirmKey(normalizeOrderFirmName(po['Firm Name']));
-        const productKey = normalizeItemKey(row['Product Name'] || po['Product Name']);
+        const dispatchProductName = String(row['Product Name'] || '').trim();
+        const productKey = normalizeItemKey(dispatchProductName || po['Product Name']);
         if (!firmKey || !productKey) return;
 
-        const truckQty = Number(row['Actual Truck Qty']) || Number(row['Qty To Be Dispatched']) || 0;
+        const actualTruckQty = Number(row['Actual Truck Qty']);
+        const plannedDispatchQty = Number(row['Qty To Be Dispatched']);
+        const validActualTruckQty = Number.isFinite(actualTruckQty) && actualTruckQty > 0 ? actualTruckQty : 0;
+        const validPlannedDispatchQty = Number.isFinite(plannedDispatchQty) && plannedDispatchQty > 0 ? plannedDispatchQty : 0;
+        const truckQty = validActualTruckQty && validPlannedDispatchQty
+          ? Math.min(validActualTruckQty, validPlannedDispatchQty)
+          : validActualTruckQty || validPlannedDispatchQty;
         const key = `${firmKey}::${productKey}`;
         if (!dispatchMap[key]) {
           dispatchMap[key] = { before: 0, after: 0, total: 0 };
         }
 
-        const rowDate = getLocalDateString(fullkittingAt);
+        const rowDate = getLocalDateString(invoiceActualizedAt);
         dispatchMap[key].total += truckQty;
-        if (selectedDate && rowDate && rowDate > selectedDate) {
+        if (selectedDate && rowDate && rowDate >= selectedDate) {
           dispatchMap[key].after += truckQty;
         } else {
           dispatchMap[key].before += truckQty;
@@ -518,7 +538,7 @@ const buildFinishedGoodPurchaseMap = async (selectedDate = '') => {
 
         const rowDate = getLocalDateString(row['Date Of Receiving'] || row['Timestamp']);
         purchaseMap[key].total += quantity;
-        if (selectedDate && rowDate && rowDate > selectedDate) {
+        if (selectedDate && rowDate && rowDate >= selectedDate) {
           purchaseMap[key].after += quantity;
         } else {
           purchaseMap[key].before += quantity;
@@ -584,7 +604,7 @@ const buildFinishedGoodReturnMap = async (selectedDate = '') => {
 
         const rowDate = getLocalDateString(returnDispatchedAt);
         returnMap[key].total += returnQty;
-        if (selectedDate && rowDate && rowDate > selectedDate) {
+        if (selectedDate && rowDate && rowDate >= selectedDate) {
           returnMap[key].after += returnQty;
         } else {
           returnMap[key].before += returnQty;
@@ -628,7 +648,7 @@ const buildFinishedGoodAdjustmentMap = async (selectedDate = '') => {
         const value = row.status === 'Factory -' ? -qty : qty;
         const rowDate = getLocalDateString(row.entry_date);
         adjustmentMap[key].total += value;
-        if (selectedDate && rowDate && rowDate > selectedDate) {
+        if (selectedDate && rowDate && rowDate >= selectedDate) {
           adjustmentMap[key].after += value;
         } else {
           adjustmentMap[key].before += value;
@@ -644,9 +664,10 @@ const buildFinishedGoodAdjustmentMap = async (selectedDate = '') => {
   return adjustmentMap;
 };
 
-const buildLiftDataMaps = async () => {
+const buildLiftDataMaps = async (selectedDate = '') => {
   const pageSize = 1000;
   const liftRows = [];
+  const fullkittingRows = [];
   const poRows = [];
 
   try {
@@ -654,7 +675,7 @@ const buildLiftDataMaps = async () => {
     for (let from = 0; ; from += pageSize) {
       const { data, error } = await purchaseSupabase
         .from('LIFT-ACCOUNTS')
-        .select('id, "Firm Name", "Raw Material Name", "Actual Quantity", "Transporting Rate"')
+        .select('id, "Firm Name", "Raw Material Name", "Actual Quantity", "Transporting Rate", "Date Of Receiving", "Timestamp"')
         .order('id', { ascending: false })
         .range(from, from + pageSize - 1);
 
@@ -663,7 +684,19 @@ const buildLiftDataMaps = async () => {
       if (!data || data.length < pageSize) break;
     }
 
-    // 2. Fetch from INDENT-PO (for PO Rates)
+    // 2. Fetch completed fullkitting records to identify History lifts
+    for (let from = 0; ; from += pageSize) {
+      const { data, error } = await purchaseSupabase
+        .from('fullkittin')
+        .select('id, "Lift No", "Bilty Number"')
+        .range(from, from + pageSize - 1);
+
+      if (error) throw error;
+      fullkittingRows.push(...(data || []));
+      if (!data || data.length < pageSize) break;
+    }
+
+    // 3. Fetch from INDENT-PO (for PO Rates)
     for (let from = 0; ; from += pageSize) {
       const { data, error } = await purchaseSupabase
         .from('INDENT-PO')
@@ -680,6 +713,16 @@ const buildLiftDataMaps = async () => {
     const transportingRatesMap = {};
     const poRatesMap = {};
 
+    const historyLiftNos = new Set();
+    const historyBiltyNos = new Set();
+
+    fullkittingRows.forEach((row) => {
+      const liftNo = String(row['Lift No'] || '').trim().toLowerCase();
+      const biltyNo = String(row['Bilty Number'] || '').trim().toLowerCase();
+      if (liftNo) historyLiftNos.add(liftNo);
+      if (biltyNo) historyBiltyNos.add(biltyNo);
+    });
+
     // Process LIFT-ACCOUNTS
     liftRows.forEach((row) => {
       const firmKey = normalizeFirmKey(row['Firm Name']);
@@ -687,11 +730,17 @@ const buildLiftDataMaps = async () => {
       if (!firmKey || !itemKey) return;
 
       const key = `${firmKey}::${itemKey}`;
+      const rowDate = getLocalDateString(row['Date Of Receiving'] || row.Timestamp);
+      const isInSelectedPeriod = !selectedDate || (rowDate && rowDate >= selectedDate);
+      const liftNo = String(row['Lift No'] || '').trim().toLowerCase();
+      const biltyNo = String(row['Bilty No.'] || '').trim().toLowerCase();
+      const isHistory = (liftNo && historyLiftNos.has(liftNo))
+        || (biltyNo && historyBiltyNos.has(biltyNo));
 
-      // Accumulate actual quantities
+      // Accumulate only receipts that appear in Fullkitting History
       const rawActualQuantity = row['Actual Quantity'];
       const actualQuantity = Number(rawActualQuantity);
-      if (rawActualQuantity !== null && rawActualQuantity !== '' && Number.isFinite(actualQuantity)) {
+      if (isHistory && isInSelectedPeriod && rawActualQuantity !== null && rawActualQuantity !== '' && Number.isFinite(actualQuantity)) {
         actualQuantityMap[key] = (actualQuantityMap[key] || 0) + actualQuantity;
       }
 
@@ -709,9 +758,9 @@ const buildLiftDataMaps = async () => {
       semiFinishedAdjustmentMap,
       crushingAdjustmentMap
     ] = await Promise.all([
-      buildProductionUsageMap(),
-      buildSemiFinishedActualLevelMap(),
-      buildCrushingActualLevelMap()
+      buildProductionUsageMap(selectedDate),
+      buildSemiFinishedActualLevelMap(selectedDate),
+      buildCrushingActualLevelMap(selectedDate)
     ]);
     Object.entries(productionUsageMap).forEach(([key, quantity]) => {
       actualQuantityMap[key] = (actualQuantityMap[key] || 0) - quantity;
@@ -884,7 +933,7 @@ export const apiService = {
   },
 
   // Inventory
-  getInventory: async (branch) => {
+  getInventory: async (branch, selectedDate = '') => {
     try {
       const [
         { data, error },
@@ -896,10 +945,10 @@ export const apiService = {
           .select('*')
           .order('firm_name', { ascending: true })
           .order('item_name', { ascending: true }),
-        buildLiftDataMaps(),
+        buildLiftDataMaps(selectedDate),
         salesRawSupabase
           .from('orders')
-          .select('qty, product_name, firm_name')
+          .select('*')
           .eq('status', 'Completed')
           .then(res => {
             if (res.error) throw res.error;
@@ -916,6 +965,11 @@ export const apiService = {
       const salesRawQtyMap = {};
 
       (salesRawOrdersResult || []).forEach(order => {
+        const orderDate = getLocalDateString(
+          order.completed_at || order.updated_at || order.created_at || order.order_date || order.date
+        );
+        if (selectedDate && (!orderDate || orderDate < selectedDate)) return;
+
         const firmKey = normalizeFirmKey(order.firm_name);
         const itemKey = normalizeItemKey(order.product_name);
         if (!firmKey || !itemKey) return;
@@ -935,11 +989,12 @@ export const apiService = {
         .map((item, index) => {
           const key = `${normalizeFirmKey(item.firm_name)}::${normalizeItemKey(item.item_name)}`;
           const rate = ratesMap[key] !== undefined ? ratesMap[key] : (item.product_rate ?? '');
+          const opStock = numberOrZero(item.op_stock);
 
           let actualLevel = actualQuantityMap[key] ?? item.actual_level ?? '';
           const salesRawQty = salesRawQtyMap[key] || 0;
-          if (actualLevel !== '' || salesRawQty !== 0) {
-            actualLevel = Number(actualLevel || 0) - salesRawQty;
+          if (actualLevel !== '' || salesRawQty !== 0 || opStock !== 0) {
+            actualLevel = opStock + Number(actualLevel || 0) - salesRawQty;
           }
 
           const optimumStock = item.optimum_stock ?? item.optimum_qty ?? '';
@@ -963,6 +1018,7 @@ export const apiService = {
             lead_time: item.lead_time_days ?? item.lead_time ?? '',
             max_stock: item.max_stock ?? item.max_qty ?? '',
             optimum_stock: optimumStock,
+            op_stock: opStock,
             actual_level: actualLevel,
             product_rate: rate,
             optimum_stock_total: calculatedOptimumTotal,
@@ -1033,7 +1089,6 @@ export const apiService = {
           const key = `${normalizeFirmKey(item.firm_name)}::${normalizeItemKey(item.product_name)}`;
           
           let productionQuantity, dispatchQuantity, purchaseQuantity, returnQuantity, adjustmentQuantity;
-          let opStockAtDate = numberOrZero(item.op_stock);
 
           if (selectedDate) {
             productionQuantity = productionMap[key]?.after || 0;
@@ -1041,14 +1096,6 @@ export const apiService = {
             purchaseQuantity = purchaseMap[key]?.after || 0;
             returnQuantity = returnMap[key]?.after || 0;
             adjustmentQuantity = adjustmentMap[key]?.after || 0;
-
-            const prodBefore = productionMap[key]?.before || 0;
-            const dispBefore = dispatchMap[key]?.before || 0;
-            const purchBefore = purchaseMap[key]?.before || 0;
-            const retBefore = returnMap[key]?.before || 0;
-            const adjBefore = adjustmentMap[key]?.before || 0;
-
-            opStockAtDate = opStockAtDate + purchBefore + prodBefore + adjBefore - dispBefore + retBefore;
           } else {
             productionQuantity = productionMap[key]?.total || 0;
             dispatchQuantity = dispatchMap[key]?.total || 0;
@@ -1059,10 +1106,11 @@ export const apiService = {
 
           const pendingOrderQuantity = pendingOrderMap[key];
           const hasCurrentLevelSync = productionQuantity !== undefined || dispatchQuantity !== undefined || purchaseQuantity !== undefined || returnQuantity !== undefined || adjustmentQuantity !== undefined;
+          const opStock = numberOrZero(item.op_stock);
 
           return {
             ...item,
-            op_stock: selectedDate ? opStockAtDate : item.op_stock,
+            op_stock: opStock,
             stock_adjustment: adjustmentQuantity !== undefined ? adjustmentQuantity : item.stock_adjustment,
             sales_order_pending: pendingOrderQuantity !== undefined ? pendingOrderQuantity : item.sales_order_pending,
             purchase_material_received: purchaseQuantity !== undefined ? purchaseQuantity : item.purchase_material_received,
@@ -1070,7 +1118,7 @@ export const apiService = {
             sales: dispatchQuantity !== undefined ? dispatchQuantity : item.sales,
             sales_return: returnQuantity !== undefined ? returnQuantity : item.sales_return,
             current_level: hasCurrentLevelSync
-              ? opStockAtDate + purchaseQuantity + productionQuantity + adjustmentQuantity - dispatchQuantity + returnQuantity
+              ? opStock + purchaseQuantity + productionQuantity + adjustmentQuantity - dispatchQuantity + returnQuantity
               : item.current_level,
             _hasCurrentLevelSync: hasCurrentLevelSync
           };

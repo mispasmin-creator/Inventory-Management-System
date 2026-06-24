@@ -3,18 +3,20 @@ import { apiService } from '../services/api';
 import { useToast } from '../components/Toast';
 import { useAuth } from './useAuth';
 
+const INVENTORY_START_DATE = '2026-06-23';
+
 export const useInventory = () => {
   const [loading, setLoading] = useState(false);
   const [inventoryItems, setInventoryItems] = useState([]);
   const { showSuccess, showError } = useToast();
   const { user } = useAuth();
 
-  const fetchInventory = useCallback(async (branch, type = 'raw_material', dateFilter = '') => {
+  const fetchInventory = useCallback(async (branch, type = 'raw_material', dateFilter = INVENTORY_START_DATE) => {
     setLoading(true);
     try {
       const data = type === 'finish_good'
         ? await apiService.getFinishGoodInventory(branch, dateFilter)
-        : await apiService.getInventory(branch);
+        : await apiService.getInventory(branch, dateFilter);
       setInventoryItems(data);
     } catch (e) {
       showError(e.message || `Failed to fetch inventory for ${branch}`);

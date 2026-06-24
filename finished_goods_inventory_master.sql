@@ -8,6 +8,7 @@ create table if not exists public.finished_goods_inventory_master (
   s_no integer,
   product_name text not null,
   op_stock numeric(14, 3) not null default 0,
+  op_stock_date date,
   stock_adjustment numeric(14, 3) not null default 0,
   sales_order_pending numeric(14, 3) not null default 0,
   purchase_material_received numeric(14, 3) not null default 0,
@@ -24,9 +25,13 @@ create table if not exists public.finished_goods_inventory_master (
   unique (firm_name, product_name)
 );
 
+alter table public.finished_goods_inventory_master
+  add column if not exists op_stock_date date;
+
 comment on column public.finished_goods_inventory_master.s_no is 'Header: S.No.';
 comment on column public.finished_goods_inventory_master.product_name is 'Header: Product Name';
 comment on column public.finished_goods_inventory_master.op_stock is 'Header: o/p stock';
+comment on column public.finished_goods_inventory_master.op_stock_date is 'Date when finished good OP. Stock was manually added or updated';
 comment on column public.finished_goods_inventory_master.stock_adjustment is 'Header: Stock Adjustment';
 comment on column public.finished_goods_inventory_master.sales_order_pending is 'Header: Sales Order Pending';
 comment on column public.finished_goods_inventory_master.purchase_material_received is 'Header: Purhcase Material Received / Purchase Material Received';

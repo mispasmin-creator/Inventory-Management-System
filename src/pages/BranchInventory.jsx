@@ -49,6 +49,8 @@ const calculateStockTotal = (actualLevel, productRate) => {
   return actual * rate;
 };
 
+const INVENTORY_START_DATE = '2026-06-23';
+
 const BranchInventory = () => {
   const { branchName: routeBranchName } = useParams();
   const location = useLocation();
@@ -89,11 +91,7 @@ const BranchInventory = () => {
   const routeType = location.pathname.startsWith('/finish-good') || location.pathname.startsWith('/finished-good') ? 'finish_good' : 'raw_material';
   const type = routeType;
   const [selectedBranch, setSelectedBranch] = useState(routeBranchName || '');
-  const [selectedDate, setSelectedDate] = useState(()=>{
-    const d = new Date();
-    d.setDate(d.getDate()-1);
-    return d.toISOString().split('T')[0];
-  });
+  const [selectedDate, setSelectedDate] = useState(INVENTORY_START_DATE);
   const isFinishGood = type === 'finish_good';
 
   const accessibleBranchOptions = React.useMemo(() => {
@@ -134,7 +132,7 @@ const BranchInventory = () => {
 
   useEffect(() => {
     if (!activeBranch || !canReadActiveBranch) return;
-    fetchInventory(activeBranch, type, type === 'finish_good' ? selectedDate : '');
+    fetchInventory(activeBranch, type, type === 'finish_good' ? selectedDate : INVENTORY_START_DATE);
     fetchTransfers();
   }, [activeBranch, type, canReadActiveBranch, selectedDate]);
 
@@ -146,14 +144,14 @@ const BranchInventory = () => {
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'inventory_master' },
-        () => fetchInventory(activeBranch, type)
+        () => fetchInventory(activeBranch, type, INVENTORY_START_DATE)
       )
       .subscribe();
 
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [activeBranch, type, canReadActiveBranch, fetchInventory]);
+  }, [activeBranch, type, canReadActiveBranch, fetchInventory, selectedDate]);
 
   useEffect(() => {
     if (type !== 'raw_material') return;
@@ -206,7 +204,8 @@ const BranchInventory = () => {
     try {
       const { data, error } = await supabase
         .from('stock_adjustment')
-        .select('firm_name, item_name, qty, status, material_type');
+        .select('firm_name, item_name, qty, status, material_type, entry_date')
+        .gte('entry_date', INVENTORY_START_DATE);
 
       if (error) throw error;
       setRawFactoryEntries(data || []);
@@ -314,7 +313,7 @@ const BranchInventory = () => {
     const success = await approveTransfer(tId);
     if (success) {
       fetchTransfers();
-      fetchInventory(activeBranch, type);
+      fetchInventory(activeBranch, type, type === 'finish_good' ? selectedDate : INVENTORY_START_DATE);
     }
   };
 
@@ -352,6 +351,7 @@ const BranchInventory = () => {
     { header: 'Firm Name', accessor: 'firm_name' },
     { header: 'Item Name', accessor: 'item_name' },
     { header: 'Unit', accessor: 'unit' },
+    { header: 'OP. Stock', accessor: 'op_stock', render: (row) => renderRawNumber(row.op_stock) },
     { header: 'Annu. Con', accessor: 'annu_con', render: (row) => renderRawNumber(row.annu_con) },
     { header: 'D. Con', accessor: 'd_con', render: (row) => renderRawNumber(row.d_con) },
     { header: 'S.F', accessor: 'sf', render: (row) => renderRawNumber(row.sf) },
@@ -584,20 +584,15 @@ const BranchInventory = () => {
               <span className="text-xs text-slate-400 font-medium shrink-0">Opening Stock Date:</span>
               <input
                 type="date"
+                min={INVENTORY_START_DATE}
                 value={selectedDate}
-                onChange={(e) => setSelectedDate(e.target.value)}
+                onChange={(e) => setSelectedDate(
+                  !e.target.value || e.target.value < INVENTORY_START_DATE
+                    ? INVENTORY_START_DATE
+                    : e.target.value
+                )}
                 className="px-3 py-2 text-xs rounded-lg glass-input bg-slate-900 text-slate-100 outline-none border border-slate-700/50 focus:border-indigo-500"
               />
-              {selectedDate && (
-                <button
-                  type="button"
-                  onClick={() => setSelectedDate('')}
-                  className="px-2.5 py-2 text-[10px] font-bold text-rose-400 hover:text-rose-300 bg-rose-950/20 hover:bg-rose-900/30 border border-rose-500/20 rounded-lg cursor-pointer"
-                  title="Clear Date Filter"
-                >
-                  Clear
-                </button>
-              )}
             </div>
           )}
           <select
