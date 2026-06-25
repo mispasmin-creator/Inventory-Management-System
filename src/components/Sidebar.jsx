@@ -54,6 +54,32 @@ const Sidebar = () => {
 
   const accessibleBranches = branches.filter((b) => hasBranchAccess(b.name, "raw_material"));
   const accessibleFinishGoodBranches = branches.filter((b) => hasBranchAccess(b.name, "finish_good"));
+  const accessibleStockAdjustmentBranches = branches.filter((branch) => {
+    if (!user) return false;
+    if (user.role === "Admin") return true;
+
+    const branchName = branch.name.replace(" Branch", "");
+    const pageAccess = user.page_access || [];
+    const normalizedBranch = branchName === "Madhya" ? "Pmmpl" : branchName;
+    const legacyBranch = normalizedBranch === "Pmmpl" ? "Madhya" : normalizedBranch;
+    const hasGranularAccess = pageAccess.some(key => key.startsWith("StockAdjustment_"));
+    const assignedBranches = user.branch === "All"
+      ? branches.map(item => item.name.replace(" Branch", ""))
+      : (Array.isArray(user.branch) ? user.branch : [user.branch]);
+    const hasAssignedBranch = assignedBranches.some(assigned =>
+      (assigned === "Madhya" ? "Pmmpl" : assigned) === normalizedBranch
+    );
+
+    if (hasGranularAccess) {
+      return hasAssignedBranch && (
+        pageAccess.includes(`StockAdjustment_${normalizedBranch}`)
+        || pageAccess.includes(`StockAdjustment_${legacyBranch}`)
+      );
+    }
+
+    if (!pageAccess.includes("StockAdjustment")) return false;
+    return hasAssignedBranch;
+  });
 
   const menuItems = [
     { title: "Dashboard",       path: "/",               icon: LayoutDashboard },
@@ -76,8 +102,7 @@ const Sidebar = () => {
     if (item.title === "Raw Material")    return accessibleBranches.length > 0;
     if (item.title === "Finished Good")   return accessibleFinishGoodBranches.length > 0;
     if (item.title === "Stock Adjustment") {
-      const allowed = user.page_access || [];
-      return allowed.includes("StockAdjustment") && accessibleBranches.length > 0;
+      return accessibleStockAdjustmentBranches.length > 0;
     }
     const dbPageName = pageMapping[item.title];
     if (!dbPageName) return true;

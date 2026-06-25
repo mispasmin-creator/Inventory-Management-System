@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Edit3, PackagePlus, Plus, SlidersHorizontal, Trash2 } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import GlassCard from '../components/GlassCard';
@@ -6,9 +6,11 @@ import Modal from '../components/Modal';
 import Table from '../components/Table';
 import { TableSkeleton } from '../components/Skeleton';
 import { useToast } from '../components/Toast';
+import { useAuth } from '../hooks/useAuth';
 import { supabase } from '../services/supabaseClient';
 
 const branchOptions = ['Purab', 'Pmmpl', 'Rkl'];
+const normalizeFirmName = (value) => value === 'Madhya' ? 'Pmmpl' : value;
 
 const defaultFormValues = {
   date: new Date().toISOString().split('T')[0],
@@ -19,8 +21,18 @@ const defaultFormValues = {
   status: 'Factory +'
 };
 
+const rawProductDefaultValues = {
+  firmName: '',
+  productName: '',
+  unit: 'MT',
+  maxQty: 0,
+  optimumQty: 0,
+  safetyFactor: 1
+};
+
 const StockAdjustment = () => {
   const { showSuccess, showError } = useToast();
+  const { user } = useAuth();
   const [activeTab, setActiveTab] = useState('adjustments');
   const [rawEntries, setRawEntries] = useState([]);
   const [rawItemOptions, setRawItemOptions] = useState([]);
@@ -31,8 +43,30 @@ const StockAdjustment = () => {
   const [rawEntryFormOpen, setRawEntryFormOpen] = useState(false);
   const [finishEntryFormOpen, setFinishEntryFormOpen] = useState(false);
   const [opStockFormOpen, setOpStockFormOpen] = useState(false);
+  const [rawProductFormOpen, setRawProductFormOpen] = useState(false);
+  const [finishProductFormOpen, setFinishProductFormOpen] = useState(false);
   const [editingOpStockRow, setEditingOpStockRow] = useState(null);
   const [opStockMaterialType, setOpStockMaterialType] = useState('finish_good');
+
+  const accessibleFirms = useMemo(() => {
+    if (user?.role === 'Admin') return branchOptions;
+    const assignedFirms = user?.branch === 'All'
+      ? branchOptions
+      : (Array.isArray(user?.branch) ? user.branch : [user?.branch]);
+    const firmsFromLogin = branchOptions.filter(firmName => assignedFirms
+      .map(normalizeFirmName)
+      .includes(firmName));
+    const pageAccess = user?.page_access || [];
+    const granularStockAccess = pageAccess
+      .filter(key => key.startsWith('StockAdjustment_'))
+      .map(key => normalizeFirmName(key.replace('StockAdjustment_', '')));
+
+    if (granularStockAccess.length === 0) return firmsFromLogin;
+    return firmsFromLogin.filter(firmName => granularStockAccess.includes(firmName));
+  }, [user]);
+
+  const defaultFirmName = accessibleFirms.length === 1 ? accessibleFirms[0] : '';
+  const getDefaultFormValues = () => ({ ...defaultFormValues, firmName: defaultFirmName });
 
   const {
     register: registerRaw,
@@ -58,26 +92,52 @@ const StockAdjustment = () => {
     formState: { errors: errorsOpStock }
   } = useForm({ defaultValues: defaultFormValues });
 
+  const {
+    register: registerRawProduct,
+    handleSubmit: handleRawProductSubmit,
+    reset: resetRawProduct,
+    formState: { errors: errorsRawProduct }
+  } = useForm({ defaultValues: rawProductDefaultValues });
+
+  const {
+    register: registerFinishProduct,
+    handleSubmit: handleFinishProductSubmit,
+    reset: resetFinishProduct,
+    formState: { errors: errorsFinishProduct }
+  } = useForm({ defaultValues: { firmName: '', productName: '' } });
+
   const selectedRawFirm = watchRaw('firmName');
   const selectedFinishFirm = watchFinish('firmName');
   const selectedOpStockFirm = watchOpStock('firmName');
 
   useEffect(() => {
+    if (!user) return;
     fetchStockAdjustments();
     fetchRawMaterialItems();
     fetchFinishGoodItems();
-  }, []);
+  }, [user]);
+
+  const restrictQueryToAccessibleFirms = (query) => {
+    const databaseFirms = accessibleFirms.flatMap(firmName =>
+      firmName === 'Pmmpl' ? ['Pmmpl', 'Madhya'] : [firmName]
+    );
+    return databaseFirms.length ? query.in('firm_name', databaseFirms) : query.in('firm_name', ['']);
+  };
 
   const fetchStockAdjustments = async () => {
     setLoading(true);
     try {
-      const { data, error } = await supabase
+      const query = supabase
         .from('stock_adjustment')
         .select('id, entry_date, firm_name, item_name, qty, remark, status, material_type, created_at')
         .order('created_at', { ascending: false });
+      const { data, error } = await restrictQueryToAccessibleFirms(query);
 
       if (error) throw error;
-      setRawEntries(data || []);
+      setRawEntries((data || []).map(row => ({
+        ...row,
+        firm_name: normalizeFirmName(row.firm_name)
+      })));
     } catch (e) {
       showError(e.message || 'Failed to load stock adjustment entries.');
     } finally {
@@ -87,14 +147,17 @@ const StockAdjustment = () => {
 
   const fetchRawMaterialItems = async () => {
     try {
-      const { data, error } = await supabase
+      const query = supabase
         .from('inventory_master')
         .select('id, firm_name, item_name, op_stock, op_stock_date')
         .order('firm_name', { ascending: true })
         .order('item_name', { ascending: true });
+      const { data, error } = await restrictQueryToAccessibleFirms(query);
 
       if (error) throw error;
-      const rawMaterialRows = (data || []).filter(item => item.firm_name && item.item_name);
+      const rawMaterialRows = (data || [])
+        .map(item => ({ ...item, firm_name: normalizeFirmName(item.firm_name) }))
+        .filter(item => item.firm_name && item.item_name);
       setRawItemOptions(rawMaterialRows);
       setRawMaterialOpStockRows(rawMaterialRows);
     } catch (e) {
@@ -104,14 +167,17 @@ const StockAdjustment = () => {
 
   const fetchFinishGoodItems = async () => {
     try {
-      const { data, error } = await supabase
+      const query = supabase
         .from('finished_goods_inventory_master')
         .select('id, firm_name, product_name, op_stock, op_stock_date')
         .order('firm_name', { ascending: true })
         .order('product_name', { ascending: true });
+      const { data, error } = await restrictQueryToAccessibleFirms(query);
 
       if (error) throw error;
-      const finishGoodRows = (data || []).filter(item => item.firm_name && item.product_name);
+      const finishGoodRows = (data || [])
+        .map(item => ({ ...item, firm_name: normalizeFirmName(item.firm_name) }))
+        .filter(item => item.firm_name && item.product_name);
       setFinishItemOptions(finishGoodRows);
       setFinishGoodOpStockRows(finishGoodRows);
     } catch (e) {
@@ -252,10 +318,68 @@ const StockAdjustment = () => {
     }
   };
 
+  const onRawProductSubmit = async (data) => {
+    try {
+      const { error } = await supabase
+        .from('inventory_master')
+        .insert([{
+          firm_name: data.firmName,
+          item_name: data.productName.trim(),
+          unit: data.unit?.trim() || 'MT',
+          max_qty: Number(data.maxQty),
+          optimum_qty: Number(data.optimumQty),
+          safety_factor: Number(data.safetyFactor)
+        }]);
+
+      if (error) throw error;
+
+      showSuccess('Raw material added successfully.');
+      await fetchRawMaterialItems();
+      resetRawProduct({ ...rawProductDefaultValues, firmName: defaultFirmName });
+      setRawProductFormOpen(false);
+    } catch (e) {
+      showError(e.code === '23505'
+        ? 'This raw material already exists for the selected firm.'
+        : e.message || 'Failed to add raw material.');
+    }
+  };
+
+  const onFinishProductSubmit = async (data) => {
+    try {
+      const { error } = await supabase
+        .from('finished_goods_inventory_master')
+        .insert([{
+          firm_name: data.firmName,
+          product_name: data.productName.trim()
+        }]);
+
+      if (error) throw error;
+
+      showSuccess('Finished good added successfully.');
+      await fetchFinishGoodItems();
+      resetFinishProduct({ firmName: defaultFirmName, productName: '' });
+      setFinishProductFormOpen(false);
+    } catch (e) {
+      showError(e.code === '23505'
+        ? 'This finished good already exists for the selected firm.'
+        : e.message || 'Failed to add finished good.');
+    }
+  };
+
+  const openRawProductForm = () => {
+    resetRawProduct({ ...rawProductDefaultValues, firmName: defaultFirmName });
+    setRawProductFormOpen(true);
+  };
+
+  const openFinishProductForm = () => {
+    resetFinishProduct({ firmName: defaultFirmName, productName: '' });
+    setFinishProductFormOpen(true);
+  };
+
   const openNewOpStockForm = (materialType) => {
     setOpStockMaterialType(materialType);
     setEditingOpStockRow(null);
-    resetOpStock(defaultFormValues);
+    resetOpStock(getDefaultFormValues());
     setOpStockFormOpen(true);
   };
 
@@ -349,6 +473,27 @@ const StockAdjustment = () => {
     ...baseColumns.slice(4)
   ];
 
+  const productRows = useMemo(() => [
+    ...rawItemOptions.map(row => ({
+      id: `raw-${row.id}`,
+      material_label: 'Raw Material',
+      firm_name: row.firm_name,
+      display_name: row.item_name
+    })),
+    ...finishItemOptions.map(row => ({
+      id: `finish-${row.id}`,
+      material_label: 'Finished Good',
+      firm_name: row.firm_name,
+      display_name: row.product_name
+    }))
+  ], [finishItemOptions, rawItemOptions]);
+
+  const productColumns = [
+    { header: 'Type', accessor: 'material_label' },
+    { header: 'Firm Name', accessor: 'firm_name' },
+    { header: 'Item / Product Name', accessor: 'display_name' }
+  ];
+
   const opStockColumns = [
     { header: 'ID', accessor: 'id' },
     { header: 'Type', accessor: 'material_label' },
@@ -418,7 +563,7 @@ const StockAdjustment = () => {
             className="w-full px-3 py-2.5 text-xs rounded-lg glass-input bg-slate-900"
           >
             <option value="">Select firm...</option>
-            {branchOptions.map(firmName => (
+            {accessibleFirms.map(firmName => (
               <option key={firmName} value={firmName}>{firmName}</option>
             ))}
           </select>
@@ -502,6 +647,124 @@ const StockAdjustment = () => {
     </form>
   );
 
+  const renderProductForm = ({
+    errors,
+    handleSubmit,
+    includeUnit = false,
+    onSubmit,
+    register,
+    setOpen,
+    submitLabel
+  }) => (
+    <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="space-y-1">
+          <label className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider pl-0.5">Firm Name</label>
+          <select
+            {...register('firmName', { required: 'Firm name is required' })}
+            className="w-full px-3 py-2.5 text-xs rounded-lg glass-input bg-slate-900"
+          >
+            <option value="">Select firm...</option>
+            {accessibleFirms.map(firmName => (
+              <option key={firmName} value={firmName}>{firmName}</option>
+            ))}
+          </select>
+          {errors.firmName && <span className="text-[10px] text-rose-400 font-medium">{errors.firmName.message}</span>}
+        </div>
+
+        <div className="space-y-1">
+          <label className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider pl-0.5">
+            {includeUnit ? 'Raw Material Name' : 'Finished Good Name'}
+          </label>
+          <input
+            type="text"
+            placeholder={includeUnit ? 'Enter raw material name' : 'Enter finished good name'}
+            {...register('productName', {
+              required: 'Name is required',
+              validate: value => value.trim().length > 0 || 'Name is required'
+            })}
+            className="w-full px-3 py-2.5 text-xs rounded-lg glass-input"
+          />
+          {errors.productName && <span className="text-[10px] text-rose-400 font-medium">{errors.productName.message}</span>}
+        </div>
+
+        {includeUnit && (
+          <>
+            <div className="space-y-1">
+              <label className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider pl-0.5">Unit</label>
+              <input
+                type="text"
+                placeholder="e.g. MT, KG"
+                {...register('unit', { required: 'Unit is required' })}
+                className="w-full px-3 py-2.5 text-xs rounded-lg glass-input"
+              />
+              {errors.unit && <span className="text-[10px] text-rose-400 font-medium">{errors.unit.message}</span>}
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider pl-0.5">Max Quantity</label>
+              <input
+                type="number"
+                step="any"
+                {...register('maxQty', {
+                  required: 'Max quantity is required',
+                  min: { value: 0, message: 'Max quantity cannot be negative' }
+                })}
+                className="w-full px-3 py-2.5 text-xs rounded-lg glass-input"
+              />
+              {errors.maxQty && <span className="text-[10px] text-rose-400 font-medium">{errors.maxQty.message}</span>}
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider pl-0.5">Optimum Quantity</label>
+              <input
+                type="number"
+                step="any"
+                {...register('optimumQty', {
+                  required: 'Optimum quantity is required',
+                  min: { value: 0, message: 'Optimum quantity cannot be negative' }
+                })}
+                className="w-full px-3 py-2.5 text-xs rounded-lg glass-input"
+              />
+              {errors.optimumQty && <span className="text-[10px] text-rose-400 font-medium">{errors.optimumQty.message}</span>}
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider pl-0.5">Safety Factor</label>
+              <input
+                type="number"
+                step="any"
+                {...register('safetyFactor', {
+                  required: 'Safety factor is required',
+                  min: { value: 0, message: 'Safety factor cannot be negative' }
+                })}
+                className="w-full px-3 py-2.5 text-xs rounded-lg glass-input"
+              />
+              {errors.safetyFactor && <span className="text-[10px] text-rose-400 font-medium">{errors.safetyFactor.message}</span>}
+            </div>
+
+          </>
+        )}
+      </div>
+
+      <div className="pt-3 border-t border-slate-800 flex justify-end gap-3 text-xs">
+        <button
+          type="button"
+          onClick={() => setOpen(false)}
+          className="px-4 py-2.5 rounded-lg bg-slate-800 text-slate-400 hover:text-slate-200 cursor-pointer"
+        >
+          Cancel
+        </button>
+        <button
+          type="submit"
+          className="px-4 py-2.5 rounded-lg bg-indigo-600 text-white font-semibold hover:bg-indigo-500 cursor-pointer"
+        >
+          {submitLabel}
+        </button>
+      </div>
+    </form>
+  );
+
   return (
     <div className="space-y-6 max-w-7xl mx-auto p-1.5 animate-slide-up">
       <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
@@ -517,21 +780,27 @@ const StockAdjustment = () => {
         {activeTab === 'adjustments' ? (
           <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
             <button
-              onClick={() => setRawEntryFormOpen(true)}
+              onClick={() => {
+                resetRaw(getDefaultFormValues());
+                setRawEntryFormOpen(true);
+              }}
               className="flex items-center justify-center gap-1.5 px-3.5 py-2 text-xs rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-semibold shadow-md transition-colors cursor-pointer"
             >
               <Plus className="w-4.5 h-4.5" />
               <span>Raw Material Form</span>
             </button>
             <button
-              onClick={() => setFinishEntryFormOpen(true)}
+              onClick={() => {
+                resetFinish(getDefaultFormValues());
+                setFinishEntryFormOpen(true);
+              }}
               className="flex items-center justify-center gap-1.5 px-3.5 py-2 text-xs rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-semibold shadow-md transition-colors cursor-pointer"
             >
               <PackagePlus className="w-4.5 h-4.5" />
               <span>Finish Good Form</span>
             </button>
           </div>
-        ) : (
+        ) : activeTab === 'op_stock' ? (
           <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
             <button
               onClick={() => openNewOpStockForm('raw_material')}
@@ -546,6 +815,23 @@ const StockAdjustment = () => {
             >
               <PackagePlus className="w-4.5 h-4.5" />
               <span>Add Finished Good OP. Stock</span>
+            </button>
+          </div>
+        ) : (
+          <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
+            <button
+              onClick={openRawProductForm}
+              className="flex items-center justify-center gap-1.5 px-3.5 py-2 text-xs rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-semibold shadow-md transition-colors cursor-pointer"
+            >
+              <Plus className="w-4.5 h-4.5" />
+              <span>Add Raw Material</span>
+            </button>
+            <button
+              onClick={openFinishProductForm}
+              className="flex items-center justify-center gap-1.5 px-3.5 py-2 text-xs rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-semibold shadow-md transition-colors cursor-pointer"
+            >
+              <PackagePlus className="w-4.5 h-4.5" />
+              <span>Add Finished Good</span>
             </button>
           </div>
         )}
@@ -574,11 +860,26 @@ const StockAdjustment = () => {
         >
           OP. Stock
         </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab('products')}
+          className={`px-4 py-2.5 text-xs font-semibold border-b-2 transition-colors cursor-pointer ${
+            activeTab === 'products'
+              ? 'border-emerald-500 text-emerald-300'
+              : 'border-transparent text-slate-500 hover:text-slate-300'
+          }`}
+        >
+          Products
+        </button>
       </div>
 
       <GlassCard className="p-2 sm:p-6">
         <h3 className="text-sm font-bold text-slate-100 mb-4">
-          {activeTab === 'adjustments' ? 'Stock Adjustment Entries' : 'Manual OP. Stock Entries'}
+          {activeTab === 'adjustments'
+            ? 'Stock Adjustment Entries'
+            : activeTab === 'op_stock'
+              ? 'Manual OP. Stock Entries'
+              : 'Raw Material & Finished Good Products'}
         </h3>
         {loading ? (
           <TableSkeleton rows={8} cols={8} />
@@ -591,6 +892,16 @@ const StockAdjustment = () => {
             filterOptions={['raw_material', 'finish_good']}
             filterPlaceholder="Filter Type"
             exportFileName="manual_op_stock_entries"
+          />
+        ) : activeTab === 'products' ? (
+          <Table
+            columns={productColumns}
+            data={productRows}
+            searchPlaceholder="Search products..."
+            filterKey="material_label"
+            filterOptions={['Raw Material', 'Finished Good']}
+            filterPlaceholder="Filter Type"
+            exportFileName="product_master"
           />
         ) : (
           <Table
@@ -619,6 +930,37 @@ const StockAdjustment = () => {
           setOpen: setRawEntryFormOpen,
           submitLabel: 'Add Entry',
           itemLabel: 'Item Name'
+        })}
+      </Modal>
+
+      <Modal
+        isOpen={rawProductFormOpen}
+        onClose={() => setRawProductFormOpen(false)}
+        title="Add Raw Material"
+      >
+        {renderProductForm({
+          errors: errorsRawProduct,
+          handleSubmit: handleRawProductSubmit,
+          includeUnit: true,
+          onSubmit: onRawProductSubmit,
+          register: registerRawProduct,
+          setOpen: setRawProductFormOpen,
+          submitLabel: 'Add Raw Material'
+        })}
+      </Modal>
+
+      <Modal
+        isOpen={finishProductFormOpen}
+        onClose={() => setFinishProductFormOpen(false)}
+        title="Add Finished Good"
+      >
+        {renderProductForm({
+          errors: errorsFinishProduct,
+          handleSubmit: handleFinishProductSubmit,
+          onSubmit: onFinishProductSubmit,
+          register: registerFinishProduct,
+          setOpen: setFinishProductFormOpen,
+          submitLabel: 'Add Finished Good'
         })}
       </Modal>
 

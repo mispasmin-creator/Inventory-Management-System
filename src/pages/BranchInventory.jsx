@@ -351,13 +351,22 @@ const BranchInventory = () => {
     { header: 'Firm Name', accessor: 'firm_name' },
     { header: 'Item Name', accessor: 'item_name' },
     { header: 'Unit', accessor: 'unit' },
-    { header: 'OP. Stock', accessor: 'op_stock', render: (row) => renderRawNumber(row.op_stock) },
     { header: 'Annu. Con', accessor: 'annu_con', render: (row) => renderRawNumber(row.annu_con) },
-    { header: 'D. Con', accessor: 'd_con', render: (row) => renderRawNumber(row.d_con) },
+    // { header: 'D. Con', accessor: 'd_con', render: (row) => renderRawNumber(row.d_con) },
     { header: 'S.F', accessor: 'sf', render: (row) => renderRawNumber(row.sf) },
     { header: 'Lead Time', accessor: 'lead_time', render: (row) => row.lead_time !== null && row.lead_time !== undefined && row.lead_time !== '' ? `${Number(row.lead_time).toLocaleString()} days` : '' },
     { header: 'Max Stock', accessor: 'max_stock', render: (row) => renderRawNumber(row.max_stock) },
     { header: 'Optimum Stock', accessor: 'optimum_stock', render: (row) => renderRawNumber(row.optimum_stock) },
+    { header: 'OP. Stock', accessor: 'op_stock', render: (row) => renderRawNumber(row.op_stock) },
+    { header: 'Stock Adjustment', accessor: 'stock_adjustment', render: (row) => renderRawNumber(row.stock_adjustment) },
+    { header: 'Purchase System', accessor: 'purchase_system', render: (row) => renderRawNumber(row.purchase_system) },
+    { header: 'Production Consumption', accessor: 'production_consumption', render: (row) => renderRawNumber(row.production_consumption) },
+    { header: 'Semi Grains', accessor: 'semi_grains', render: (row) => renderRawNumber(row.semi_grains) },
+    { header: 'Semi Fines', accessor: 'semi_fines', render: (row) => renderRawNumber(row.semi_fines) },
+    { header: 'Crushing Grains', accessor: 'crushing_grains', render: (row) => renderRawNumber(row.crushing_grains) },
+    // { header: 'Crushing Fines', accessor: 'crushing_fines', render: (row) => renderRawNumber(row.crushing_fines) },
+    { header: 'Crushing Lumps', accessor: 'crushing_lumps', render: (row) => renderRawNumber(row.crushing_lumps) },
+    { header: 'Raw Material Sales', accessor: 'raw_material_sales', render: (row) => renderRawNumber(row.raw_material_sales) },
     { header: 'Actual Level', accessor: 'actual_level', render: (row) => renderRawNumber(row.actual_level) },
     { header: 'Product Rate', accessor: 'product_rate', render: (row) => renderRawCurrency(row.product_rate) },
     { header: 'Optimum Stock Total', accessor: 'optimum_stock_total', render: (row) => renderRawCurrency(row.optimum_stock_total) },
@@ -439,6 +448,7 @@ const BranchInventory = () => {
 
       return {
         ...item,
+        stock_adjustment: firmAdjustment + legacyAdjustment,
         actual_level: adjustedActualLevel,
         colour: status
       };

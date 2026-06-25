@@ -48,8 +48,16 @@ const ALL_PAGE_GROUPS = [
       { key: 'FinishGood_Rkl',   label: 'Rkl Branch' },
     ]
   },
+  {
+    group: 'Stock Adjustment',
+    icon: SlidersHorizontal,
+    pages: [
+      { key: 'StockAdjustment_Purab', label: 'Purab Branch' },
+      { key: 'StockAdjustment_Pmmpl', label: 'Pmmpl Branch' },
+      { key: 'StockAdjustment_Rkl', label: 'Rkl Branch' },
+    ]
+  },
   { group: null, pages: [
-    { key: 'StockAdjustment', label: 'Stock Adjustment', icon: SlidersHorizontal },
     { key: 'Settings',  label: 'System Settings',  icon: Cog },
     { key: 'Dashboard', label: 'Dashboard',        icon: LayoutDashboard },
   ]},
@@ -63,7 +71,20 @@ const BRANCH_OPTIONS = ['Purab', 'Pmmpl', 'Rkl'];
 const normalizeBranchName = (value) => value === 'Madhya' ? 'Pmmpl' : value;
 const normalizePageAccessKey = (key) => key
   ?.replace('RawMaterial_Madhya', 'RawMaterial_Pmmpl')
-  .replace('FinishGood_Madhya', 'FinishGood_Pmmpl');
+  .replace('FinishGood_Madhya', 'FinishGood_Pmmpl')
+  .replace('StockAdjustment_Madhya', 'StockAdjustment_Pmmpl');
+
+const normalizePageAccess = (pageAccess = []) => {
+  const normalized = pageAccess.map(normalizePageAccessKey);
+  if (!normalized.includes('StockAdjustment')) return normalized;
+
+  return [
+    ...normalized.filter(key => key !== 'StockAdjustment'),
+    'StockAdjustment_Purab',
+    'StockAdjustment_Pmmpl',
+    'StockAdjustment_Rkl'
+  ];
+};
 
 const emptyForm = {
   username: '',
@@ -169,7 +190,7 @@ const Settings = () => {
       password: usr.password || '', // pre-fill password
       role: usr.role,
       firms: firmStringToArray(usr.firm_name),
-      page_access: (usr.page_access || []).map(normalizePageAccessKey),
+      page_access: normalizePageAccess(usr.page_access),
     });
     setShowPassword(false);
     setEditOpen(true);
@@ -334,6 +355,35 @@ const Settings = () => {
       </div>
 
       {/* Page Access — shown for non-Admin roles */}
+      <div className="space-y-2">
+        <label className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider pl-0.5">
+          Firm Name
+        </label>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          {['All', ...BRANCH_OPTIONS].map(firm => {
+            const isActive = form.firms.includes(firm);
+            return (
+              <label
+                key={firm}
+                className={`flex items-center gap-2 px-3 py-2.5 rounded-lg border cursor-pointer transition-all text-xs select-none ${
+                  isActive
+                    ? 'bg-indigo-950/40 border-indigo-500/40 text-indigo-200'
+                    : 'bg-slate-900/30 border-slate-800/70 text-slate-500 hover:border-slate-600 hover:text-slate-300'
+                }`}
+              >
+                <input
+                  type="checkbox"
+                  checked={isActive}
+                  onChange={() => toggleFirm(firm)}
+                  className="accent-indigo-500 w-3.5 h-3.5 shrink-0"
+                />
+                <span className="font-medium">{firm === 'All' ? 'All Firms' : firm}</span>
+              </label>
+            );
+          })}
+        </div>
+      </div>
+
       {form.role !== 'Admin' && (
         <div className="space-y-3">
           <div className="flex items-center justify-between">

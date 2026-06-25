@@ -220,6 +220,8 @@ const buildSemiFinishedActualLevelMap = async (selectedDate = '') => {
   const pageSize = 1000;
   const productionFirmMap = new Map();
   const semiAdjustmentMap = {};
+  const semiGrainsMap = {};
+  const semiFinesMap = {};
 
   try {
     for (let from = 0; ; from += pageSize) {
@@ -263,14 +265,19 @@ const buildSemiFinishedActualLevelMap = async (selectedDate = '') => {
 
         const productText = String(productName || '').toLowerCase();
         const signedQuantity = productText.includes('grains')
-          ? quantity
+          ? -quantity
           : productText.includes('fines')
-            ? -quantity
+            ? quantity
             : 0;
         if (signedQuantity === 0) return;
 
         const key = `${firmKey}::${productKey}`;
         semiAdjustmentMap[key] = (semiAdjustmentMap[key] || 0) + signedQuantity;
+        if (productText.includes('grains')) {
+          semiGrainsMap[key] = (semiGrainsMap[key] || 0) + signedQuantity;
+        } else if (productText.includes('fines')) {
+          semiFinesMap[key] = (semiFinesMap[key] || 0) + signedQuantity;
+        }
       });
 
       if (!data || data.length < pageSize) break;
@@ -279,12 +286,15 @@ const buildSemiFinishedActualLevelMap = async (selectedDate = '') => {
     console.warn('Supabase semi finished actual sync failed:', error.message);
   }
 
-  return semiAdjustmentMap;
+  return { semiAdjustmentMap, semiGrainsMap, semiFinesMap };
 };
 
 const buildCrushingActualLevelMap = async (selectedDate = '') => {
   const pageSize = 1000;
   const crushingAdjustmentMap = {};
+  const crushingGrainsMap = {};
+  const crushingFinesMap = {};
+  const crushingLumpsMap = {};
 
   try {
     for (let from = 0; ; from += pageSize) {
@@ -317,6 +327,13 @@ const buildCrushingActualLevelMap = async (selectedDate = '') => {
 
         const key = `${firmKey}::${productKey}`;
         crushingAdjustmentMap[key] = (crushingAdjustmentMap[key] || 0) + signedQuantity;
+        if (productText.includes('grains')) {
+          crushingGrainsMap[key] = (crushingGrainsMap[key] || 0) + signedQuantity;
+        } else if (productText.includes('fines')) {
+          crushingFinesMap[key] = (crushingFinesMap[key] || 0) + signedQuantity;
+        } else if (productText.includes('lumps') || productText.includes('fired')) {
+          crushingLumpsMap[key] = (crushingLumpsMap[key] || 0) + signedQuantity;
+        }
       });
 
       if (!data || data.length < pageSize) break;
@@ -325,7 +342,12 @@ const buildCrushingActualLevelMap = async (selectedDate = '') => {
     console.warn('Supabase crushing actual sync failed:', error.message);
   }
 
-  return crushingAdjustmentMap;
+  return {
+    crushingAdjustmentMap,
+    crushingGrainsMap,
+    crushingFinesMap,
+    crushingLumpsMap
+  };
 };
 
 const buildFinishedGoodProductionMap = async (selectedDate = '') => {
@@ -710,6 +732,7 @@ const buildLiftDataMaps = async (selectedDate = '') => {
     }
 
     const actualQuantityMap = {};
+    const purchaseQuantityMap = {};
     const transportingRatesMap = {};
     const poRatesMap = {};
 
@@ -742,6 +765,7 @@ const buildLiftDataMaps = async (selectedDate = '') => {
       const actualQuantity = Number(rawActualQuantity);
       if (isHistory && isInSelectedPeriod && rawActualQuantity !== null && rawActualQuantity !== '' && Number.isFinite(actualQuantity)) {
         actualQuantityMap[key] = (actualQuantityMap[key] || 0) + actualQuantity;
+        purchaseQuantityMap[key] = (purchaseQuantityMap[key] || 0) + actualQuantity;
       }
 
       // Set the latest transporting rate
@@ -755,8 +779,8 @@ const buildLiftDataMaps = async (selectedDate = '') => {
 
     const [
       { usageMap: productionUsageMap, annualUsageMap: annualProductionUsageMap },
-      semiFinishedAdjustmentMap,
-      crushingAdjustmentMap
+      { semiAdjustmentMap, semiGrainsMap, semiFinesMap },
+      { crushingAdjustmentMap, crushingGrainsMap, crushingFinesMap, crushingLumpsMap }
     ] = await Promise.all([
       buildProductionUsageMap(selectedDate),
       buildSemiFinishedActualLevelMap(selectedDate),
@@ -765,7 +789,7 @@ const buildLiftDataMaps = async (selectedDate = '') => {
     Object.entries(productionUsageMap).forEach(([key, quantity]) => {
       actualQuantityMap[key] = (actualQuantityMap[key] || 0) - quantity;
     });
-    Object.entries(semiFinishedAdjustmentMap).forEach(([key, quantity]) => {
+    Object.entries(semiAdjustmentMap).forEach(([key, quantity]) => {
       actualQuantityMap[key] = (actualQuantityMap[key] || 0) + quantity;
     });
     Object.entries(crushingAdjustmentMap).forEach(([key, quantity]) => {
@@ -804,10 +828,32 @@ const buildLiftDataMaps = async (selectedDate = '') => {
       }
     });
 
-    return { actualQuantityMap, ratesMap, annualProductionUsageMap };
+    return {
+      actualQuantityMap,
+      ratesMap,
+      annualProductionUsageMap,
+      purchaseQuantityMap,
+      productionUsageMap,
+      semiGrainsMap,
+      semiFinesMap,
+      crushingGrainsMap,
+      crushingFinesMap,
+      crushingLumpsMap
+    };
   } catch (error) {
     console.warn('Supabase purchase tables data sync failed:', error.message);
-    return { actualQuantityMap: {}, ratesMap: {}, annualProductionUsageMap: {} };
+    return {
+      actualQuantityMap: {},
+      ratesMap: {},
+      annualProductionUsageMap: {},
+      purchaseQuantityMap: {},
+      productionUsageMap: {},
+      semiGrainsMap: {},
+      semiFinesMap: {},
+      crushingGrainsMap: {},
+      crushingFinesMap: {},
+      crushingLumpsMap: {}
+    };
   }
 };
 
@@ -937,7 +983,18 @@ export const apiService = {
     try {
       const [
         { data, error },
-        { actualQuantityMap, ratesMap, annualProductionUsageMap },
+        {
+          actualQuantityMap,
+          ratesMap,
+          annualProductionUsageMap,
+          purchaseQuantityMap,
+          productionUsageMap,
+          semiGrainsMap,
+          semiFinesMap,
+          crushingGrainsMap,
+          crushingFinesMap,
+          crushingLumpsMap
+        },
         salesRawOrdersResult
       ] = await Promise.all([
         supabase
@@ -1019,6 +1076,14 @@ export const apiService = {
             max_stock: item.max_stock ?? item.max_qty ?? '',
             optimum_stock: optimumStock,
             op_stock: opStock,
+            purchase_system: purchaseQuantityMap[key] || 0,
+            production_consumption: -(productionUsageMap[key] || 0),
+            semi_grains: semiGrainsMap[key] || 0,
+            semi_fines: semiFinesMap[key] || 0,
+            crushing_grains: crushingGrainsMap[key] || 0,
+            crushing_fines: crushingFinesMap[key] || 0,
+            crushing_lumps: crushingLumpsMap[key] || 0,
+            raw_material_sales: -salesRawQty,
             actual_level: actualLevel,
             product_rate: rate,
             optimum_stock_total: calculatedOptimumTotal,
