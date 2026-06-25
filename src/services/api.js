@@ -689,16 +689,17 @@ const buildFinishedGoodAdjustmentMap = async (selectedDate = '') => {
 const buildLiftDataMaps = async (selectedDate = '') => {
   const pageSize = 1000;
   const liftRows = [];
-  const fullkittingRows = [];
   const poRows = [];
 
   try {
-    // 1. Fetch from LIFT-ACCOUNTS (for Quantities and Transporting Rates)
+    // 1. Fetch only receipts completed through Receipt Of Material / Physical Quality Check.
     for (let from = 0; ; from += pageSize) {
       const { data, error } = await purchaseSupabase
         .from('LIFT-ACCOUNTS')
-        .select('id, "Firm Name", "Raw Material Name", "Actual Quantity", "Transporting Rate", "Date Of Receiving", "Timestamp"')
-        .order('id', { ascending: false })
+        .select('id, "Lift No", "Firm Name", "Raw Material Name", "Actual Quantity", "Transporting Rate", "Date Of Receiving", "Actual 1"')
+        .not('Actual 1', 'is', null)
+        .not('Actual Quantity', 'is', null)
+        .order('Actual 1', { ascending: false })
         .range(from, from + pageSize - 1);
 
       if (error) throw error;
@@ -706,19 +707,7 @@ const buildLiftDataMaps = async (selectedDate = '') => {
       if (!data || data.length < pageSize) break;
     }
 
-    // 2. Fetch completed fullkitting records to identify History lifts
-    for (let from = 0; ; from += pageSize) {
-      const { data, error } = await purchaseSupabase
-        .from('fullkittin')
-        .select('id, "Lift No", "Bilty Number"')
-        .range(from, from + pageSize - 1);
-
-      if (error) throw error;
-      fullkittingRows.push(...(data || []));
-      if (!data || data.length < pageSize) break;
-    }
-
-    // 3. Fetch from INDENT-PO (for PO Rates)
+    // 2. Fetch from INDENT-PO (for PO Rates)
     for (let from = 0; ; from += pageSize) {
       const { data, error } = await purchaseSupabase
         .from('INDENT-PO')
@@ -736,34 +725,22 @@ const buildLiftDataMaps = async (selectedDate = '') => {
     const transportingRatesMap = {};
     const poRatesMap = {};
 
-    const historyLiftNos = new Set();
-    const historyBiltyNos = new Set();
-
-    fullkittingRows.forEach((row) => {
-      const liftNo = String(row['Lift No'] || '').trim().toLowerCase();
-      const biltyNo = String(row['Bilty Number'] || '').trim().toLowerCase();
-      if (liftNo) historyLiftNos.add(liftNo);
-      if (biltyNo) historyBiltyNos.add(biltyNo);
-    });
-
     // Process LIFT-ACCOUNTS
     liftRows.forEach((row) => {
+      if (isBlankValue(row['Actual 1']) || isBlankValue(row['Actual Quantity'])) return;
+
       const firmKey = normalizeFirmKey(row['Firm Name']);
       const itemKey = normalizeItemKey(row['Raw Material Name']);
       if (!firmKey || !itemKey) return;
 
       const key = `${firmKey}::${itemKey}`;
-      const rowDate = getLocalDateString(row['Date Of Receiving'] || row.Timestamp);
+      const rowDate = getLocalDateString(row['Date Of Receiving']);
       const isInSelectedPeriod = !selectedDate || (rowDate && rowDate >= selectedDate);
-      const liftNo = String(row['Lift No'] || '').trim().toLowerCase();
-      const biltyNo = String(row['Bilty No.'] || '').trim().toLowerCase();
-      const isHistory = (liftNo && historyLiftNos.has(liftNo))
-        || (biltyNo && historyBiltyNos.has(biltyNo));
 
-      // Accumulate only receipts that appear in Fullkitting History
+      // Accumulate only receipts whose quality-check process has completed.
       const rawActualQuantity = row['Actual Quantity'];
       const actualQuantity = Number(rawActualQuantity);
-      if (isHistory && isInSelectedPeriod && rawActualQuantity !== null && rawActualQuantity !== '' && Number.isFinite(actualQuantity)) {
+      if (isInSelectedPeriod && Number.isFinite(actualQuantity)) {
         actualQuantityMap[key] = (actualQuantityMap[key] || 0) + actualQuantity;
         purchaseQuantityMap[key] = (purchaseQuantityMap[key] || 0) + actualQuantity;
       }

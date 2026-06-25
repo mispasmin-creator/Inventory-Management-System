@@ -3,7 +3,7 @@ import { useParams, useLocation } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { useInventory } from '../hooks/useInventory';
 import { apiService } from '../services/api';
-import { supabase } from '../services/supabaseClient';
+import { purchaseSupabase, supabase } from '../services/supabaseClient';
 import Table from '../components/Table';
 import Modal from '../components/Modal';
 import GlassCard from '../components/GlassCard';
@@ -139,7 +139,7 @@ const BranchInventory = () => {
   useEffect(() => {
     if (type !== 'raw_material' || !activeBranch || !canReadActiveBranch) return undefined;
 
-    const channel = supabase
+    const inventoryChannel = supabase
       .channel(`inventory-master-${activeBranch}`)
       .on(
         'postgres_changes',
@@ -148,8 +148,18 @@ const BranchInventory = () => {
       )
       .subscribe();
 
+    const receiptChannel = purchaseSupabase
+      .channel(`lift-accounts-inventory-${activeBranch}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'LIFT-ACCOUNTS' },
+        () => fetchInventory(activeBranch, type, INVENTORY_START_DATE)
+      )
+      .subscribe();
+
     return () => {
-      supabase.removeChannel(channel);
+      supabase.removeChannel(inventoryChannel);
+      purchaseSupabase.removeChannel(receiptChannel);
     };
   }, [activeBranch, type, canReadActiveBranch, fetchInventory, selectedDate]);
 
