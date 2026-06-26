@@ -1054,7 +1054,7 @@ export const apiService = {
             optimum_stock: optimumStock,
             op_stock: opStock,
             purchase_system: purchaseQuantityMap[key] || 0,
-            production_consumption: -(productionUsageMap[key] || 0),
+            production_consumption: -(productionUsageMap[key] || 0) + (semiGrainsMap[key] || 0) + (semiFinesMap[key] || 0) + (crushingGrainsMap[key] || 0) + (crushingLumpsMap[key] || 0),
             semi_grains: semiGrainsMap[key] || 0,
             semi_fines: semiFinesMap[key] || 0,
             crushing_grains: crushingGrainsMap[key] || 0,

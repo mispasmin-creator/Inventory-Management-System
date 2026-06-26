@@ -335,7 +335,9 @@ const BranchInventory = () => {
   };
 
   // ── Finish Good Columns (per-branch) ─────────────────────────────────────
-  const renderFinishGoodNumber = (value) => value !== null && value !== undefined && value !== '' ? Number(value).toLocaleString() : '-';
+  const renderFinishGoodNumber = (value) => value !== null && value !== undefined && value !== '' ? Math.abs(Number(value)).toLocaleString() : '-';
+
+  const isNonZero = (val) => val !== null && val !== undefined && val !== '' && Number(val) !== 0;
 
   const finishGoodColumns = [
     { header: 'S.N.', accessor: '_sn', render: (row, rowIndex) => rowIndex + 1 },
@@ -344,16 +346,49 @@ const BranchInventory = () => {
     { header: 'Op. Stock', accessor: 'op_stock', render: (row) => renderFinishGoodNumber(row.op_stock) },
     { header: 'Stock Adjustment', accessor: 'stock_adjustment', render: (row) => renderFinishGoodNumber(row.stock_adjustment) },
     { header: 'Sales Order Pending', accessor: 'sales_order_pending', render: (row) => renderFinishGoodNumber(row.sales_order_pending) },
-    { header: 'Purchase Material Received', accessor: 'purchase_material_received', render: (row) => renderFinishGoodNumber(row.purchase_material_received) },
-    { header: 'Production', accessor: 'production', render: (row) => renderFinishGoodNumber(row.production) },
-    { header: 'Sales', accessor: 'sales', render: (row) => renderFinishGoodNumber(row.sales) },
-    { header: 'Sales Return', accessor: 'sales_return', render: (row) => renderFinishGoodNumber(row.sales_return) },
-    { header: 'Consumption', accessor: 'consumption', render: (row) => renderFinishGoodNumber(row.consumption) },
-    { header: 'Current Level', accessor: 'current_level', render: (row) => renderFinishGoodNumber(row.current_level) },
+    { 
+      header: 'Purchase Material Received', 
+      accessor: 'purchase_material_received', 
+      cellClassName: (row) => isNonZero(row.purchase_material_received) ? 'bg-emerald-600/90 text-white font-bold' : '',
+      render: (row) => renderFinishGoodNumber(row.purchase_material_received)
+    },
+    { 
+      header: 'Production', 
+      accessor: 'production', 
+      cellClassName: (row) => isNonZero(row.production) ? 'bg-emerald-600/90 text-white font-bold' : '',
+      render: (row) => renderFinishGoodNumber(row.production)
+    },
+    { 
+      header: 'Sales', 
+      accessor: 'sales', 
+      cellClassName: (row) => isNonZero(row.sales) ? 'bg-rose-600/90 text-white font-bold' : '',
+      render: (row) => renderFinishGoodNumber(row.sales)
+    },
+    { 
+      header: 'Sales Return', 
+      accessor: 'sales_return', 
+      cellClassName: (row) => isNonZero(row.sales_return) ? 'bg-emerald-600/90 text-white font-bold' : '',
+      render: (row) => renderFinishGoodNumber(row.sales_return)
+    },
+    { 
+      header: 'Consumption', 
+      accessor: 'consumption', 
+      cellClassName: (row) => isNonZero(row.consumption) ? 'bg-rose-600/90 text-white font-bold' : '',
+      render: (row) => renderFinishGoodNumber(row.consumption)
+    },
+    { 
+      header: 'Current Level', 
+      accessor: 'current_level', 
+      cellClassName: (row) => {
+        const hasShortage = Number(row.current_level || 0) < Number(row.sales_order_pending || 0);
+        return hasShortage ? 'bg-rose-600/90 text-white font-bold' : 'bg-emerald-600/90 text-white font-bold';
+      },
+      render: (row) => renderFinishGoodNumber(row.current_level)
+    },
   ];
 
-  const renderRawNumber = (value) => value !== null && value !== undefined && value !== '' ? Number(value).toLocaleString() : '';
-  const renderRawCurrency = (value) => value !== null && value !== undefined && value !== '' ? `₹${Number(value).toLocaleString()}` : '';
+  const renderRawNumber = (value) => value !== null && value !== undefined && value !== '' ? Math.abs(Number(value)).toLocaleString() : '';
+  const renderRawCurrency = (value) => value !== null && value !== undefined && value !== '' ? `₹${Math.abs(Number(value)).toLocaleString()}` : '';
 
   // Raw Material Columns
   const rawMaterialColumns = [
@@ -369,50 +404,48 @@ const BranchInventory = () => {
     { header: 'Optimum Stock', accessor: 'optimum_stock', render: (row) => renderRawNumber(row.optimum_stock) },
     { header: 'OP. Stock', accessor: 'op_stock', render: (row) => renderRawNumber(row.op_stock) },
     { header: 'Stock Adjustment', accessor: 'stock_adjustment', render: (row) => renderRawNumber(row.stock_adjustment) },
-    { header: 'Purchase System', accessor: 'purchase_system', render: (row) => renderRawNumber(row.purchase_system) },
-    { header: 'Production Consumption', accessor: 'production_consumption', render: (row) => renderRawNumber(row.production_consumption) },
-    { header: 'Semi Grains', accessor: 'semi_grains', render: (row) => renderRawNumber(row.semi_grains) },
-    { header: 'Semi Fines', accessor: 'semi_fines', render: (row) => renderRawNumber(row.semi_fines) },
-    { header: 'Crushing Grains', accessor: 'crushing_grains', render: (row) => renderRawNumber(row.crushing_grains) },
-    // { header: 'Crushing Fines', accessor: 'crushing_fines', render: (row) => renderRawNumber(row.crushing_fines) },
-    { header: 'Crushing Lumps', accessor: 'crushing_lumps', render: (row) => renderRawNumber(row.crushing_lumps) },
-    { header: 'Raw Material Sales', accessor: 'raw_material_sales', render: (row) => renderRawNumber(row.raw_material_sales) },
-    { header: 'Actual Level', accessor: 'actual_level', render: (row) => renderRawNumber(row.actual_level) },
+    { 
+      header: 'Purchase System', 
+      accessor: 'purchase_system', 
+      cellClassName: (row) => isNonZero(row.purchase_system) ? 'bg-emerald-600/90 text-white font-bold' : '',
+      render: (row) => renderRawNumber(row.purchase_system)
+    },
+    { 
+      header: 'Production Consumption', 
+      accessor: 'production_consumption', 
+      cellClassName: (row) => isNonZero(row.production_consumption) ? 'bg-rose-600/90 text-white font-bold' : '',
+      render: (row) => renderRawNumber(row.production_consumption)
+    },
+    { 
+      header: 'Raw Material Sales', 
+      accessor: 'raw_material_sales', 
+      cellClassName: (row) => isNonZero(row.raw_material_sales) ? 'bg-rose-600/90 text-white font-bold' : '',
+      render: (row) => renderRawNumber(row.raw_material_sales)
+    },
+    { 
+      header: 'Actual Level', 
+      accessor: 'actual_level', 
+      cellClassName: (row) => {
+        if (row.colour === 'Low') return 'bg-rose-600/90 text-white font-bold';
+        if (row.colour === 'Optimum') return 'bg-emerald-600/90 text-white font-bold';
+        if (row.colour === 'Extra') return 'bg-amber-500/90 text-slate-950 font-bold';
+        return '';
+      },
+      render: (row) => renderRawNumber(row.actual_level)
+    },
     { header: 'Product Rate', accessor: 'product_rate', render: (row) => renderRawCurrency(row.product_rate) },
     { header: 'Optimum Stock Total', accessor: 'optimum_stock_total', render: (row) => renderRawCurrency(row.optimum_stock_total) },
     { header: 'Stock Total', accessor: 'stock_total', render: (row) => renderRawCurrency(row.stock_total) },
     { 
       header: 'Colour', 
       accessor: 'colour',
-      render: (row) => {
-        if (row.colour === 'Low') {
-          return (
-            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-600 text-white uppercase tracking-wider">
-              Low
-            </span>
-          );
-        } else if (row.colour === 'Optimum') {
-          return (
-            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-600 text-white uppercase tracking-wider">
-              Optimum
-            </span>
-          );
-        } else if (row.colour === 'Extra') {
-          return (
-            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500 text-slate-950 uppercase tracking-wider">
-              Extra
-            </span>
-          );
-        } else {
-          return row.colour ? (
-            <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-slate-800 text-slate-400 border border-slate-700/50">
-              {row.colour}
-            </span>
-          ) : (
-            <span className="text-slate-500">-</span>
-          );
-        }
-      }
+      cellClassName: (row) => {
+        if (row.colour === 'Low') return 'bg-rose-600/90 text-white font-bold text-center uppercase tracking-wider text-[11px]';
+        if (row.colour === 'Optimum') return 'bg-emerald-600/90 text-white font-bold text-center uppercase tracking-wider text-[11px]';
+        if (row.colour === 'Extra') return 'bg-amber-500/90 text-slate-950 font-bold text-center uppercase tracking-wider text-[11px]';
+        return 'text-center';
+      },
+      render: (row) => row.colour || '-'
     },
   ];
 

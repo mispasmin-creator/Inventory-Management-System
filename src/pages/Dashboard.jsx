@@ -104,9 +104,23 @@ const Dashboard = () => {
       const branchRawSummaries = [];
       const branchFGSummaries = [];
 
+      // Fetch all data in parallel at the global level
+      const [allRawItems, allFGItems, reports] = await Promise.all([
+        apiService.getInventory('All'),
+        apiService.getFinishGoodInventory('All'),
+        apiService.getReports()
+      ]);
+
       for (const bName of branchesToFetch) {
-        // Fetch Raw Materials
-        const items = await apiService.getInventory(bName);
+        // Filter Raw Materials locally
+        const normalizedBranch = bName?.toLowerCase().trim();
+        const items = allRawItems.filter(item => {
+          if (!normalizedBranch || normalizedBranch === 'all') return true;
+          const firmName = String(item.firm_name || '').toLowerCase();
+          if (normalizedBranch === 'pmmpl') return firmName.includes('pmmpl') || firmName.includes('madhya');
+          return firmName.includes(normalizedBranch);
+        });
+
         let branchRawWeight = 0;
         
         items.forEach(item => {
@@ -144,13 +158,14 @@ const Dashboard = () => {
           itemCount: items.length
         });
 
-        // Fetch Finished Goods
-        let fgItems = [];
-        try {
-          fgItems = await apiService.getFinishGoodInventory(bName);
-        } catch (err) {
-          console.warn("Finished Goods fetch error:", err);
-        }
+        // Filter Finished Goods locally
+        const b = bName ? bName.toLowerCase().trim() : '';
+        let fgItems = allFGItems.filter(fgItem => {
+          if (!b || b === 'all') return true;
+          const firmName = String(fgItem.firm_name || '').toLowerCase();
+          const target = (b === 'madhya' ? 'pmmpl' : b);
+          return firmName === target;
+        });
 
         if (!fgItems || fgItems.length === 0) {
           fgItems = generateMockFinishedGoods(bName);
@@ -216,16 +231,13 @@ const Dashboard = () => {
       // Stacked bar chart showing branch distribution
       const branchStackedData = branchesToFetch.map(bName => {
         const rawSum = rawItemsList.filter(item => item.branchName === bName).reduce((sum, item) => sum + item.actualLevel, 0);
-        const fgSum = fgItemsList.filter(item => item.branchName === bName).reduce((sum, item) => sum + item.currentLevel, 0);
+        const fgSum = fgItemsList.filter(item => item.currentLevel !== undefined && item.branchName === bName).reduce((sum, item) => sum + item.currentLevel, 0);
         return {
           name: bName,
           'Raw Material': Math.round(rawSum),
           'Finished Good': Math.round(fgSum)
         };
       });
-
-      // Fetch financial details & reports
-      const reports = await apiService.getReports();
       
       const totalPurchases = reports.purchases
         .filter(p => user.branch === 'All' || (Array.isArray(user.branch) ? user.branch.some(b => b.toLowerCase() === p.branch.toLowerCase()) : p.branch.toLowerCase() === user.branch.toLowerCase()))

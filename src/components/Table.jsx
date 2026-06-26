@@ -227,11 +227,16 @@ const Table = ({
                   key={rIdx} 
                   className="hover:bg-slate-800/10 transition-colors duration-150"
                 >
-                  {columns.map((col, cIdx) => (
-                    <td key={cIdx} className="px-3 py-1.5 sm:px-4 sm:py-2 whitespace-nowrap">
-                      {col.render ? col.render(row, (currentPage - 1) * pageSize + rIdx) : (typeof col.accessor === 'function' ? col.accessor(row) : row[col.accessor])}
-                    </td>
-                  ))}
+                  {columns.map((col, cIdx) => {
+                    const extraClass = typeof col.cellClassName === 'function' 
+                      ? col.cellClassName(row, (currentPage - 1) * pageSize + rIdx) 
+                      : (col.cellClassName || '');
+                    return (
+                      <td key={cIdx} className={`px-3 py-1.5 sm:px-4 sm:py-2 whitespace-nowrap ${extraClass}`}>
+                        {col.render ? col.render(row, (currentPage - 1) * pageSize + rIdx) : (typeof col.accessor === 'function' ? col.accessor(row) : row[col.accessor])}
+                      </td>
+                    );
+                  })}
                 </tr>
               ))
             )}
