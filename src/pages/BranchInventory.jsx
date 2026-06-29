@@ -508,20 +508,35 @@ const BranchInventory = () => {
       });
     });
 
-    if (isFinishGood) {
-      // Rows with any meaningful data come first, empty rows at the bottom
-      const hasData = (item) => {
-        const fields = ['op_stock', 'production', 'sales', 'sales_return', 'consumption', 'current_level', 'purchase_material_received', 'stock_adjustment', 'sales_order_pending'];
-        return fields.some(f => item[f] !== null && item[f] !== undefined && Number(item[f]) !== 0);
-      };
-      return [...filtered].sort((a, b) => {
-        const aHas = hasData(a) ? 0 : 1;
-        const bHas = hasData(b) ? 0 : 1;
-        return aHas - bHas;
-      });
-    }
+    const hasActual = (item) => {
+      const val = isFinishGood ? item.current_level : item.actual_level;
+      if (val === null || val === undefined) return false;
+      const strVal = String(val).trim();
+      return strVal !== '' && strVal !== '-';
+    };
 
-    return filtered;
+    const getName = (item) => {
+      return isFinishGood ? (item.product_name || '') : (item.item_name || '');
+    };
+
+    const sorted = [...filtered].sort((a, b) => {
+      const aHas = hasActual(a);
+      const bHas = hasActual(b);
+
+      if (aHas && !bHas) return -1;
+      if (!aHas && bHas) return 1;
+
+      const nameA = getName(a).toLowerCase();
+      const nameB = getName(b).toLowerCase();
+      if (nameA < nameB) return -1;
+      if (nameA > nameB) return 1;
+      return 0;
+    });
+
+    return sorted.map((item, index) => ({
+      ...item,
+      s_no: index + 1
+    }));
   }, [processedInventoryItems, accessibleBranchOptions, isFinishGood]);
 
   // Pick correct column set

@@ -46,6 +46,7 @@ const StockAdjustment = () => {
   const [rawProductFormOpen, setRawProductFormOpen] = useState(false);
   const [finishProductFormOpen, setFinishProductFormOpen] = useState(false);
   const [editingOpStockRow, setEditingOpStockRow] = useState(null);
+  const [editingAdjustment, setEditingAdjustment] = useState(null);
   const [opStockMaterialType, setOpStockMaterialType] = useState('finish_good');
 
   const accessibleFirms = useMemo(() => {
@@ -233,24 +234,41 @@ const StockAdjustment = () => {
 
   const onRawEntrySubmit = async (data) => {
     try {
-      const { error } = await supabase
-        .from('stock_adjustment')
-        .insert([{
-          entry_date: data.date,
-          firm_name: data.firmName,
-          item_name: data.itemName,
-          material_type: 'raw_material',
-          qty: Number(data.qty),
-          remark: data.remark || null,
-          status: data.status
-        }]);
+      if (editingAdjustment) {
+        const { error } = await supabase
+          .from('stock_adjustment')
+          .update({
+            entry_date: data.date,
+            firm_name: data.firmName,
+            item_name: data.itemName,
+            qty: Number(data.qty),
+            remark: data.remark || null,
+            status: data.status
+          })
+          .eq('id', editingAdjustment.id);
 
-      if (error) throw error;
+        if (error) throw error;
+        showSuccess('Raw material factory entry updated successfully.');
+      } else {
+        const { error } = await supabase
+          .from('stock_adjustment')
+          .insert([{
+            entry_date: data.date,
+            firm_name: data.firmName,
+            item_name: data.itemName,
+            material_type: 'raw_material',
+            qty: Number(data.qty),
+            remark: data.remark || null,
+            status: data.status
+          }]);
 
-      showSuccess('Raw material factory entry saved successfully.');
+        if (error) throw error;
+        showSuccess('Raw material factory entry saved successfully.');
+      }
       fetchStockAdjustments();
       resetRaw(defaultFormValues);
       setRawEntryFormOpen(false);
+      setEditingAdjustment(null);
     } catch (e) {
       showError(e.message || 'Failed to save raw material factory entry.');
     }
@@ -258,24 +276,41 @@ const StockAdjustment = () => {
 
   const onFinishEntrySubmit = async (data) => {
     try {
-      const { error } = await supabase
-        .from('stock_adjustment')
-        .insert([{
-          entry_date: data.date,
-          firm_name: data.firmName,
-          item_name: data.itemName,
-          material_type: 'finish_good',
-          qty: Number(data.qty),
-          remark: data.remark || null,
-          status: data.status
-        }]);
+      if (editingAdjustment) {
+        const { error } = await supabase
+          .from('stock_adjustment')
+          .update({
+            entry_date: data.date,
+            firm_name: data.firmName,
+            item_name: data.itemName,
+            qty: Number(data.qty),
+            remark: data.remark || null,
+            status: data.status
+          })
+          .eq('id', editingAdjustment.id);
 
-      if (error) throw error;
+        if (error) throw error;
+        showSuccess('Finish good factory entry updated successfully.');
+      } else {
+        const { error } = await supabase
+          .from('stock_adjustment')
+          .insert([{
+            entry_date: data.date,
+            firm_name: data.firmName,
+            item_name: data.itemName,
+            material_type: 'finish_good',
+            qty: Number(data.qty),
+            remark: data.remark || null,
+            status: data.status
+          }]);
 
-      showSuccess('Finish good factory entry saved successfully.');
+        if (error) throw error;
+        showSuccess('Finish good factory entry saved successfully.');
+      }
       fetchStockAdjustments();
       resetFinish(defaultFormValues);
       setFinishEntryFormOpen(false);
+      setEditingAdjustment(null);
     } catch (e) {
       showError(e.message || 'Failed to save finish good factory entry.');
     }
@@ -402,6 +437,53 @@ const StockAdjustment = () => {
     resetOpStock(defaultFormValues);
   };
 
+  const openEditAdjustmentForm = (row) => {
+    setEditingAdjustment(row);
+    if (row.material_type === 'raw_material') {
+      resetRaw({
+        date: row.entry_date,
+        firmName: row.firm_name,
+        itemName: row.item_name,
+        qty: row.qty,
+        remark: row.remark || '',
+        status: row.status
+      });
+      setRawEntryFormOpen(true);
+    } else {
+      resetFinish({
+        date: row.entry_date,
+        firmName: row.firm_name,
+        itemName: row.item_name,
+        qty: row.qty,
+        remark: row.remark || '',
+        status: row.status
+      });
+      setFinishEntryFormOpen(true);
+    }
+  };
+
+  const handleDeleteAdjustment = async (row) => {
+    if (!window.confirm(`Remove Stock Adjustment for ${row.item_name}?`)) {
+      return;
+    }
+
+    try {
+      const { error } = await supabase
+        .from('stock_adjustment')
+        .update({
+          qty: 0
+        })
+        .eq('id', row.id);
+
+      if (error) throw error;
+
+      showSuccess('Stock adjustment removed successfully (qty set to 0).');
+      fetchStockAdjustments();
+    } catch (e) {
+      showError(e.message || 'Failed to remove stock adjustment.');
+    }
+  };
+
   const handleDeleteOpStock = async (row) => {
     const materialLabel = row.material_type === 'raw_material' ? 'raw material' : 'finished good';
     if (!window.confirm(`Remove OP. Stock for ${row.display_name}? The ${materialLabel} master item will remain unchanged.`)) {
@@ -470,7 +552,32 @@ const StockAdjustment = () => {
       header: 'Item / Product Name',
       accessor: 'item_name'
     },
-    ...baseColumns.slice(4)
+    ...baseColumns.slice(4),
+    {
+      header: 'Action',
+      accessor: '',
+      sortable: false,
+      render: (row) => (
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => openEditAdjustmentForm(row)}
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-indigo-600/20 text-indigo-300 hover:bg-indigo-600 hover:text-white transition-colors cursor-pointer"
+          >
+            <Edit3 className="w-3.5 h-3.5" />
+            Edit
+          </button>
+          <button
+            type="button"
+            onClick={() => handleDeleteAdjustment(row)}
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-rose-600/20 text-red-600 hover:bg-rose-600 hover:text-white transition-colors cursor-pointer"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+            Delete
+          </button>
+        </div>
+      )
+    }
   ];
 
   const productRows = useMemo(() => [
@@ -918,8 +1025,12 @@ const StockAdjustment = () => {
 
       <Modal
         isOpen={rawEntryFormOpen}
-        onClose={() => setRawEntryFormOpen(false)}
-        title="Raw Material Factory Entry"
+        onClose={() => {
+          setRawEntryFormOpen(false);
+          setEditingAdjustment(null);
+          resetRaw(defaultFormValues);
+        }}
+        title={editingAdjustment ? "Edit Raw Material Factory Entry" : "Raw Material Factory Entry"}
       >
         {renderAdjustmentForm({
           errors: errorsRaw,
@@ -927,8 +1038,14 @@ const StockAdjustment = () => {
           handleSubmit: handleRawSubmit,
           onSubmit: onRawEntrySubmit,
           register: registerRaw,
-          setOpen: setRawEntryFormOpen,
-          submitLabel: 'Add Entry',
+          setOpen: (open) => {
+            if (!open) {
+              setRawEntryFormOpen(false);
+              setEditingAdjustment(null);
+              resetRaw(defaultFormValues);
+            }
+          },
+          submitLabel: editingAdjustment ? 'Update Entry' : 'Add Entry',
           itemLabel: 'Item Name'
         })}
       </Modal>
@@ -966,8 +1083,12 @@ const StockAdjustment = () => {
 
       <Modal
         isOpen={finishEntryFormOpen}
-        onClose={() => setFinishEntryFormOpen(false)}
-        title="Finish Good Factory Entry"
+        onClose={() => {
+          setFinishEntryFormOpen(false);
+          setEditingAdjustment(null);
+          resetFinish(defaultFormValues);
+        }}
+        title={editingAdjustment ? "Edit Finish Good Factory Entry" : "Finish Good Factory Entry"}
       >
         {renderAdjustmentForm({
           errors: errorsFinish,
@@ -975,8 +1096,14 @@ const StockAdjustment = () => {
           handleSubmit: handleFinishSubmit,
           onSubmit: onFinishEntrySubmit,
           register: registerFinish,
-          setOpen: setFinishEntryFormOpen,
-          submitLabel: 'Add Entry',
+          setOpen: (open) => {
+            if (!open) {
+              setFinishEntryFormOpen(false);
+              setEditingAdjustment(null);
+              resetFinish(defaultFormValues);
+            }
+          },
+          submitLabel: editingAdjustment ? 'Update Entry' : 'Add Entry',
           itemLabel: 'Product Name'
         })}
       </Modal>
