@@ -470,17 +470,15 @@ const StockAdjustment = () => {
     try {
       const { error } = await supabase
         .from('stock_adjustment')
-        .update({
-          qty: 0
-        })
+        .delete()
         .eq('id', row.id);
 
       if (error) throw error;
 
-      showSuccess('Stock adjustment removed successfully (qty set to 0).');
+      showSuccess('Stock adjustment entry removed successfully.');
       fetchStockAdjustments();
     } catch (e) {
-      showError(e.message || 'Failed to remove stock adjustment.');
+      showError(e.message || 'Failed to remove stock adjustment entry.');
     }
   };
 
