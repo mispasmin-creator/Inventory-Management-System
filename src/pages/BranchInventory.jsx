@@ -335,7 +335,7 @@ const BranchInventory = () => {
   };
 
   // ── Finish Good Columns (per-branch) ─────────────────────────────────────
-  const renderFinishGoodNumber = (value) => value !== null && value !== undefined && value !== '' ? Number(value).toLocaleString() : '-';
+  const renderFinishGoodNumber = (value) => value !== null && value !== undefined && value !== '' ? Math.abs(Number(value)).toLocaleString() : '-';
 
   const isNonZero = (val) => val !== null && val !== undefined && val !== '' && Number(val) !== 0;
 
@@ -383,7 +383,7 @@ const BranchInventory = () => {
         const hasShortage = Number(row.current_level || 0) < Number(row.sales_order_pending || 0);
         return hasShortage ? 'bg-rose-600/90 text-white font-bold' : 'bg-emerald-600/90 text-white font-bold';
       },
-      render: (row) => renderFinishGoodNumber(row.current_level)
+      render: (row) => row.current_level !== null && row.current_level !== undefined && row.current_level !== '' ? Number(row.current_level).toLocaleString() : '-'
     },
   ];
 
@@ -431,7 +431,7 @@ const BranchInventory = () => {
         if (row.colour === 'Extra') return 'bg-amber-500/90 text-slate-950 font-bold';
         return '';
       },
-      render: (row) => renderRawNumber(row.actual_level)
+      render: (row) => row.actual_level !== null && row.actual_level !== undefined && row.actual_level !== '' ? Number(row.actual_level).toLocaleString() : ''
     },
     { header: 'Product Rate', accessor: 'product_rate', render: (row) => renderRawCurrency(row.product_rate) },
     { header: 'Optimum Stock Total', accessor: 'optimum_stock_total', render: (row) => renderRawCurrency(row.optimum_stock_total) },
