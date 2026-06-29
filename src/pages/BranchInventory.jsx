@@ -335,7 +335,7 @@ const BranchInventory = () => {
   };
 
   // ── Finish Good Columns (per-branch) ─────────────────────────────────────
-  const renderFinishGoodNumber = (value) => value !== null && value !== undefined && value !== '' ? Math.abs(Number(value)).toLocaleString() : '-';
+  const renderFinishGoodNumber = (value) => value !== null && value !== undefined && value !== '' ? Number(value).toLocaleString() : '-';
 
   const isNonZero = (val) => val !== null && val !== undefined && val !== '' && Number(val) !== 0;
 
