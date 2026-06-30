@@ -164,6 +164,23 @@ const BranchInventory = () => {
   }, [activeBranch, type, canReadActiveBranch, fetchInventory, selectedDate]);
 
   useEffect(() => {
+    if (type !== 'finish_good' || !activeBranch || !canReadActiveBranch) return undefined;
+
+    const purchaseReturnsChannel = purchaseSupabase
+      .channel(`purchase-returns-finished-goods-${activeBranch}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'Purchase Returns' },
+        () => fetchInventory(activeBranch, type, selectedDate)
+      )
+      .subscribe();
+
+    return () => {
+      purchaseSupabase.removeChannel(purchaseReturnsChannel);
+    };
+  }, [activeBranch, type, canReadActiveBranch, fetchInventory, selectedDate]);
+
+  useEffect(() => {
     if (type !== 'raw_material') return;
     fetchRawFactoryEntries();
   }, [type]);
@@ -349,6 +366,16 @@ const BranchInventory = () => {
 
   const isNonZero = (val) => val !== null && val !== undefined && val !== '' && Number(val) !== 0;
 
+  const getColourForStatus = (status) => {
+    if (!status) return '';
+    const s = String(status).trim().toLowerCase();
+    if (s === 'no stock' || s === 'low stock' || s === 'red') return 'Red';
+    if (s === 'medium stock' || s === 'orange') return 'Orange';
+    if (s === 'normal stock' || s === 'green') return 'Green';
+    if (s === 'excess stock' || s === 'purple') return 'Purple';
+    return '';
+  };
+
   const finishGoodColumns = [
     { header: 'S.N.', accessor: '_sn', render: (row, rowIndex) => rowIndex + 1 },
     { header: 'Firm Name', accessor: 'firm_name' },
@@ -359,31 +386,37 @@ const BranchInventory = () => {
     { 
       header: 'Purchase Material Received', 
       accessor: 'purchase_material_received', 
-      cellClassName: (row) => isNonZero(row.purchase_material_received) ? 'bg-emerald-600/90 text-white font-bold' : '',
+      cellClassName: () => 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 font-bold',
       render: (row) => renderFinishGoodNumber(row.purchase_material_received)
+    },
+    { 
+      header: 'Purchase Return', 
+      accessor: 'purchase_return', 
+      cellClassName: () => 'bg-rose-500/15 text-rose-600 dark:text-rose-400 font-bold',
+      render: (row) => renderFinishGoodNumber(row.purchase_return)
     },
     { 
       header: 'Production', 
       accessor: 'production', 
-      cellClassName: (row) => isNonZero(row.production) ? 'bg-emerald-600/90 text-white font-bold' : '',
+      cellClassName: () => 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 font-bold',
       render: (row) => renderFinishGoodNumber(row.production)
     },
     { 
       header: 'Sales', 
       accessor: 'sales', 
-      cellClassName: (row) => isNonZero(row.sales) ? 'bg-rose-600/90 text-white font-bold' : '',
+      cellClassName: () => 'bg-rose-500/15 text-rose-600 dark:text-rose-400 font-bold',
       render: (row) => renderFinishGoodNumber(row.sales)
     },
     { 
       header: 'Sales Return', 
       accessor: 'sales_return', 
-      cellClassName: (row) => isNonZero(row.sales_return) ? 'bg-emerald-600/90 text-white font-bold' : '',
+      cellClassName: () => 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 font-bold',
       render: (row) => renderFinishGoodNumber(row.sales_return)
     },
     { 
       header: 'Consumption', 
       accessor: 'consumption', 
-      cellClassName: (row) => isNonZero(row.consumption) ? 'bg-rose-600/90 text-white font-bold' : '',
+      cellClassName: () => 'bg-rose-500/15 text-rose-600 dark:text-rose-400 font-bold',
       render: (row) => renderFinishGoodNumber(row.consumption)
     },
     { 
@@ -417,29 +450,30 @@ const BranchInventory = () => {
     { 
       header: 'Purchase System', 
       accessor: 'purchase_system', 
-      cellClassName: (row) => isNonZero(row.purchase_system) ? 'bg-emerald-600/90 text-white font-bold' : '',
+      cellClassName: () => 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 font-bold',
       render: (row) => renderRawNumber(row.purchase_system)
     },
     { 
       header: 'Production Consumption', 
       accessor: 'production_consumption', 
-      cellClassName: (row) => isNonZero(row.production_consumption) ? 'bg-rose-600/90 text-white font-bold' : '',
+      cellClassName: () => 'bg-rose-500/15 text-rose-600 dark:text-rose-400 font-bold',
       render: (row) => renderRawNumber(row.production_consumption)
     },
     { 
       header: 'Raw Material Sales', 
       accessor: 'raw_material_sales', 
-      cellClassName: (row) => isNonZero(row.raw_material_sales) ? 'bg-rose-600/90 text-white font-bold' : '',
+      cellClassName: () => 'bg-rose-500/15 text-rose-600 dark:text-rose-400 font-bold',
       render: (row) => renderRawNumber(row.raw_material_sales)
     },
     { 
       header: 'Actual Level', 
       accessor: 'actual_level', 
       cellClassName: (row) => {
-        if (row.colour === 'Red') return 'bg-gradient-to-r from-red-500/90 to-rose-600/90 text-white font-bold';
-        if (row.colour === 'Orange') return 'bg-gradient-to-r from-amber-500/90 to-orange-500/90 text-white font-bold';
-        if (row.colour === 'Green') return 'bg-gradient-to-r from-emerald-500/90 to-teal-600/90 text-white font-bold';
-        if (row.colour === 'Purple') return 'bg-gradient-to-r from-indigo-500/90 to-purple-600/90 text-white font-bold';
+        const color = getColourForStatus(row.colour);
+        if (color === 'Red') return 'bg-gradient-to-r from-red-500/90 to-rose-600/90 text-white font-bold';
+        if (color === 'Orange') return 'bg-gradient-to-r from-amber-500/90 to-orange-500/90 text-white font-bold';
+        if (color === 'Green') return 'bg-gradient-to-r from-emerald-500/90 to-teal-600/90 text-white font-bold';
+        if (color === 'Purple') return 'bg-gradient-to-r from-indigo-500/90 to-purple-600/90 text-white font-bold';
         return '';
       },
       render: (row) => row.actual_level !== null && row.actual_level !== undefined && row.actual_level !== '' ? Number(row.actual_level).toLocaleString() : ''
@@ -451,10 +485,11 @@ const BranchInventory = () => {
       header: 'Colour', 
       accessor: 'colour',
       cellClassName: (row) => {
-        if (row.colour === 'Red') return 'bg-gradient-to-r from-red-500/90 to-rose-600/90 text-white font-bold text-center uppercase tracking-wider text-[11px]';
-        if (row.colour === 'Orange') return 'bg-gradient-to-r from-amber-500/90 to-orange-500/90 text-white font-bold text-center uppercase tracking-wider text-[11px]';
-        if (row.colour === 'Green') return 'bg-gradient-to-r from-emerald-500/90 to-teal-600/90 text-white font-bold text-center uppercase tracking-wider text-[11px]';
-        if (row.colour === 'Purple') return 'bg-gradient-to-r from-indigo-500/90 to-purple-600/90 text-white font-bold text-center uppercase tracking-wider text-[11px]';
+        const color = getColourForStatus(row.colour);
+        if (color === 'Red') return 'bg-gradient-to-r from-red-500/90 to-rose-600/90 text-white font-bold text-center uppercase tracking-wider text-[11px]';
+        if (color === 'Orange') return 'bg-gradient-to-r from-amber-500/90 to-orange-500/90 text-white font-bold text-center uppercase tracking-wider text-[11px]';
+        if (color === 'Green') return 'bg-gradient-to-r from-emerald-500/90 to-teal-600/90 text-white font-bold text-center uppercase tracking-wider text-[11px]';
+        if (color === 'Purple') return 'bg-gradient-to-r from-indigo-500/90 to-purple-600/90 text-white font-bold text-center uppercase tracking-wider text-[11px]';
         return 'text-center';
       },
       render: (row) => row.colour || '-'
@@ -492,16 +527,33 @@ const BranchInventory = () => {
       const calculatedDCon = (annual !== null && !isNaN(annual)) ? (annual / 300) : (item.d_con != null ? Number(item.d_con) : null);
 
       let status = '';
-      if (actual !== null && optimum !== null && optimum !== 0) {
+      const maxStock = item.max_stock != null ? Number(item.max_stock) : null;
+
+      if (actual !== null && maxStock !== null && maxStock !== 0) {
+        if (actual === 0) {
+          status = 'No Stock';
+        } else if (actual > maxStock) {
+          status = 'Excess Stock';
+        } else {
+          const ratio = actual / maxStock;
+          if (ratio >= 0.66) {
+            status = 'Normal Stock';
+          } else if (ratio >= 0.33) {
+            status = 'Medium Stock';
+          } else {
+            status = 'Low Stock';
+          }
+        }
+      } else if (actual !== null && optimum !== null && optimum !== 0) {
         const pct = (actual / optimum) * 100;
         if (pct < 33) {
-          status = 'Red';
+          status = 'Low Stock';
         } else if (pct >= 33 && pct < 66) {
-          status = 'Orange';
+          status = 'Medium Stock';
         } else if (pct >= 66 && pct <= 100) {
-          status = 'Green';
+          status = 'Normal Stock';
         } else {
-          status = 'Purple';
+          status = 'Excess Stock';
         }
       } else {
         status = item.colour || '';
@@ -557,6 +609,43 @@ const BranchInventory = () => {
       s_no: index + 1
     }));
   }, [processedInventoryItems, accessibleBranchOptions, isFinishGood]);
+
+  const totals = React.useMemo(() => {
+    const res = {
+      optimumGrandTotal: 0,
+      stockGrandTotal: 0,
+      byBranch: {
+        Madhya: { optimum: 0, stock: 0 },
+        Purab: { optimum: 0, stock: 0 },
+        Rkl: { optimum: 0, stock: 0 }
+      }
+    };
+
+    displayedInventoryItems.forEach(item => {
+      const firmName = item.firm_name || '';
+      const normFirm = firmName.toLowerCase().trim();
+      let branchKey = 'Purab';
+      if (normFirm.includes('pmmpl') || normFirm.includes('madhya')) {
+        branchKey = 'Madhya';
+      } else if (normFirm.includes('rkl')) {
+        branchKey = 'Rkl';
+      } else if (normFirm.includes('purab')) {
+        branchKey = 'Purab';
+      } else {
+        return;
+      }
+
+      const optimumVal = Number(item.optimum_stock_total || 0);
+      const stockVal = Number(item.stock_total || 0);
+
+      res.byBranch[branchKey].optimum += optimumVal;
+      res.byBranch[branchKey].stock += stockVal;
+      res.optimumGrandTotal += optimumVal;
+      res.stockGrandTotal += stockVal;
+    });
+
+    return res;
+  }, [displayedInventoryItems]);
 
   // Pick correct column set
   const inventoryColumns = isFinishGood ? finishGoodColumns : rawMaterialColumns;
@@ -694,6 +783,39 @@ const BranchInventory = () => {
           </select>
         </div>
       </div>
+
+      {/* Totals Cards for Raw Material */}
+      {type === 'raw_material' && hasInventoryAccess && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <GlassCard className="p-5 flex flex-col justify-between items-center text-center transition-all duration-300 hover:scale-[1.01]">
+            <div>
+              <p className="text-slate-500 text-[11px] font-bold uppercase tracking-wider">Optimum Stock Total</p>
+              <h3 className="text-2xl font-extrabold text-emerald-500 dark:text-emerald-400 mt-2">
+                ₹{totals.optimumGrandTotal.toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 3 })}
+              </h3>
+            </div>
+            <div className="mt-3 flex flex-col items-center justify-center text-[10px] text-slate-500 space-y-0.5">
+              <div>Madhya: <span className="font-medium text-slate-400">₹{totals.byBranch.Madhya.optimum.toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 3 })}</span></div>
+              <div>Purab: <span className="font-medium text-slate-400">₹{totals.byBranch.Purab.optimum.toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 3 })}</span></div>
+              <div>Rkl: <span className="font-medium text-slate-400">₹{totals.byBranch.Rkl.optimum.toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 3 })}</span></div>
+            </div>
+          </GlassCard>
+
+          <GlassCard className="p-5 flex flex-col justify-between items-center text-center transition-all duration-300 hover:scale-[1.01]">
+            <div>
+              <p className="text-slate-500 text-[11px] font-bold uppercase tracking-wider">Stock Total</p>
+              <h3 className="text-2xl font-extrabold text-emerald-500 dark:text-emerald-400 mt-2">
+                ₹{totals.stockGrandTotal.toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 3 })}
+              </h3>
+            </div>
+            <div className="mt-3 flex flex-col items-center justify-center text-[10px] text-slate-500 space-y-0.5">
+              <div>Madhya: <span className="font-medium text-slate-400">₹{totals.byBranch.Madhya.stock.toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 3 })}</span></div>
+              <div>Purab: <span className="font-medium text-slate-400">₹{totals.byBranch.Purab.stock.toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 3 })}</span></div>
+              <div>Rkl: <span className="font-medium text-slate-400">₹{totals.byBranch.Rkl.stock.toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 3 })}</span></div>
+            </div>
+          </GlassCard>
+        </div>
+      )}
 
       {/* Main Tab Renderings */}
       <GlassCard className="p-2 sm:p-6">

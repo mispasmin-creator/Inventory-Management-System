@@ -33,6 +33,22 @@ const normalizeItemKey = (value) =>
     .toLowerCase()
     .replace(/[^a-z0-9]/g, '');
 
+const cleanJsonString = (val) => {
+  if (!val) return '';
+  let str = String(val).trim();
+  if (str.startsWith('[') && str.endsWith(']')) {
+    try {
+      const parsed = JSON.parse(str);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        str = String(parsed[0]).trim();
+      }
+    } catch (e) {
+      str = str.slice(1, -1).replace(/^["']|["']$/g, '').trim();
+    }
+  }
+  return str;
+};
+
 const getLocalDateString = (val) => {
   if (!val) return '';
   if (typeof val === 'string') {
@@ -450,6 +466,53 @@ const buildFinishedGoodConsumptionMap = async (selectedDate = '') => {
   }
 
   return consumptionMap;
+};
+
+const buildFinishedGoodPurchaseReturnMap = async (selectedDate = '') => {
+  const pageSize = 1000;
+  const purchaseReturnMap = {};
+
+  try {
+    for (let from = 0; ; from += pageSize) {
+      const { data, error } = await purchaseSupabase
+        .from('Purchase Returns')
+        .select('"ID", "Firm Name", "Product Name", "Return This Time", "Time Stamp"')
+        .order('ID', { ascending: false })
+        .range(from, from + pageSize - 1);
+
+      if (error) throw error;
+
+      (data || []).forEach((row) => {
+        const cleanFirm = cleanJsonString(row['Firm Name']);
+        const cleanProduct = cleanJsonString(row['Product Name']);
+        const firmKey = normalizeFirmKey(cleanFirm);
+        const productKey = normalizeItemKey(cleanProduct);
+        const rawQty = row['Return This Time'];
+        const qty = Number(rawQty);
+
+        if (!firmKey || !productKey || rawQty === null || rawQty === '' || !Number.isFinite(qty)) return;
+
+        const key = `${firmKey}::${productKey}`;
+        if (!purchaseReturnMap[key]) {
+          purchaseReturnMap[key] = { before: 0, after: 0, total: 0 };
+        }
+
+        const rowDate = getLocalDateString(row['Time Stamp']);
+        purchaseReturnMap[key].total += qty;
+        if (selectedDate && rowDate && rowDate >= selectedDate) {
+          purchaseReturnMap[key].after += qty;
+        } else {
+          purchaseReturnMap[key].before += qty;
+        }
+      });
+
+      if (!data || data.length < pageSize) break;
+    }
+  } catch (error) {
+    console.warn('Supabase finished good purchase return sync failed:', error.message);
+  }
+
+  return purchaseReturnMap;
 };
 
 const buildFinishedGoodDispatchMap = async (selectedDate = '') => {
@@ -1089,13 +1152,9 @@ export const apiService = {
           }
 
           const optimumStock = item.optimum_stock ?? item.optimum_qty ?? '';
-          const hasProductionUsage = Object.prototype.hasOwnProperty.call(annualProductionUsageMap, key);
-          const annualConsumption = hasProductionUsage
-            ? roundTo(annualProductionUsageMap[key], 2)
-            : (item.annual_consumption ?? item.annu_con ?? '');
-          const dailyConsumption = hasProductionUsage
-            ? roundTo(Number(annualConsumption) / DAILY_CONSUMPTION_WORKING_DAYS, 2)
-            : (item.daily_consumption ?? item.d_con ?? '');
+          const dbAnnuCon = item.annu_con ?? item.annual_consumption;
+          const annualConsumption = dbAnnuCon !== null && dbAnnuCon !== undefined && dbAnnuCon !== '' ? Number(dbAnnuCon) : 0;
+          const dailyConsumption = annualConsumption > 0 ? roundTo(annualConsumption / 300, 3) : 0;
 
           const calculatedOptimumTotal = calculateOptimumStockTotal(optimumStock, rate);
           const calculatedStockTotal = calculateStockTotal(actualLevel, rate);
@@ -1165,6 +1224,7 @@ export const apiService = {
       const returnMapPromise = buildFinishedGoodReturnMap(selectedDate);
       const adjustmentMapPromise = buildFinishedGoodAdjustmentMap(selectedDate);
       const consumptionMapPromise = buildFinishedGoodConsumptionMap(selectedDate);
+      const purchaseReturnMapPromise = buildFinishedGoodPurchaseReturnMap(selectedDate);
       let query = supabase
         .from('finished_goods_inventory_master')
         .select('*')
@@ -1185,11 +1245,12 @@ export const apiService = {
       const returnMap = await returnMapPromise;
       const adjustmentMap = await adjustmentMapPromise;
       const consumptionMap = await consumptionMapPromise;
+      const purchaseReturnMap = await purchaseReturnMapPromise;
       return (data || [])
         .map((item) => {
           const key = `${normalizeFirmKey(item.firm_name)}::${normalizeItemKey(item.product_name)}`;
           
-          let productionQuantity, dispatchQuantity, purchaseQuantity, returnQuantity, adjustmentQuantity, consumptionQuantity;
+          let productionQuantity, dispatchQuantity, purchaseQuantity, returnQuantity, adjustmentQuantity, consumptionQuantity, purchaseReturnQuantity;
 
           if (selectedDate) {
             productionQuantity = productionMap[key]?.after || 0;
@@ -1198,6 +1259,7 @@ export const apiService = {
             returnQuantity = returnMap[key]?.after || 0;
             adjustmentQuantity = adjustmentMap[key]?.after || 0;
             consumptionQuantity = consumptionMap[key]?.after || 0;
+            purchaseReturnQuantity = purchaseReturnMap[key]?.after || 0;
           } else {
             productionQuantity = productionMap[key]?.total || 0;
             dispatchQuantity = dispatchMap[key]?.total || 0;
@@ -1205,10 +1267,11 @@ export const apiService = {
             returnQuantity = returnMap[key]?.total || 0;
             adjustmentQuantity = adjustmentMap[key]?.total || 0;
             consumptionQuantity = consumptionMap[key]?.total || 0;
+            purchaseReturnQuantity = purchaseReturnMap[key]?.total || 0;
           }
 
           const pendingOrderQuantity = pendingOrderMap[key];
-          const hasCurrentLevelSync = productionQuantity !== undefined || dispatchQuantity !== undefined || purchaseQuantity !== undefined || returnQuantity !== undefined || adjustmentQuantity !== undefined || consumptionQuantity !== undefined;
+          const hasCurrentLevelSync = productionQuantity !== undefined || dispatchQuantity !== undefined || purchaseQuantity !== undefined || returnQuantity !== undefined || adjustmentQuantity !== undefined || consumptionQuantity !== undefined || purchaseReturnQuantity !== undefined;
           const opStock = numberOrZero(item.op_stock);
 
           return {
@@ -1221,8 +1284,9 @@ export const apiService = {
             sales: dispatchQuantity !== undefined ? dispatchQuantity : item.sales,
             sales_return: returnQuantity !== undefined ? returnQuantity : item.sales_return,
             consumption: consumptionQuantity !== undefined ? consumptionQuantity : item.consumption,
+            purchase_return: purchaseReturnQuantity !== undefined ? purchaseReturnQuantity : item.purchase_return,
             current_level: hasCurrentLevelSync
-              ? opStock + purchaseQuantity + productionQuantity + adjustmentQuantity - dispatchQuantity + returnQuantity - consumptionQuantity
+              ? opStock + purchaseQuantity + productionQuantity + adjustmentQuantity - dispatchQuantity + returnQuantity - consumptionQuantity - purchaseReturnQuantity
               : item.current_level,
             _hasCurrentLevelSync: hasCurrentLevelSync
           };
