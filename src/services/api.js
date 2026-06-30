@@ -395,6 +395,63 @@ const buildFinishedGoodProductionMap = async (selectedDate = '') => {
   return productionMap;
 };
 
+const buildFinishedGoodConsumptionMap = async (selectedDate = '') => {
+  const pageSize = 1000;
+  const consumptionMap = {};
+
+  try {
+    const rawMaterialColumns = Array.from({ length: 20 }, (_, index) => {
+      const rawIndex = index + 1;
+      return `"Raw Material Name ${rawIndex}", "Quantity Of Raw Material ${rawIndex}"`;
+    }).join(', ');
+    const selectColumns = `id, "Timestamp", "Date Of Production", "FIRM Name", ${rawMaterialColumns}`;
+
+    for (let from = 0; ; from += pageSize) {
+      const { data, error } = await productionSupabase
+        .from('actual_production')
+        .select(selectColumns)
+        .order('id', { ascending: false })
+        .range(from, from + pageSize - 1);
+
+      if (error) throw error;
+
+      (data || []).forEach((row) => {
+        const firmKey = normalizeFirmKey(normalizeProductionFirmName(row['FIRM Name']));
+        if (!firmKey) return;
+
+        const productionDateString = getLocalDateString(row['Date Of Production'] || row.Timestamp);
+
+        for (let i = 1; i <= 20; i += 1) {
+          const itemKey = normalizeItemKey(row[`Raw Material Name ${i}`]);
+          if (!itemKey) continue;
+
+          const rawQuantity = row[`Quantity Of Raw Material ${i}`];
+          const quantity = Number(rawQuantity);
+          if (rawQuantity === null || rawQuantity === '' || !Number.isFinite(quantity)) continue;
+
+          const key = `${firmKey}::${itemKey}`;
+          if (!consumptionMap[key]) {
+            consumptionMap[key] = { before: 0, after: 0, total: 0 };
+          }
+
+          consumptionMap[key].total += quantity;
+          if (selectedDate && productionDateString && productionDateString >= selectedDate) {
+            consumptionMap[key].after += quantity;
+          } else {
+            consumptionMap[key].before += quantity;
+          }
+        }
+      });
+
+      if (!data || data.length < pageSize) break;
+    }
+  } catch (error) {
+    console.warn('Supabase finished good consumption map build failed:', error.message);
+  }
+
+  return consumptionMap;
+};
+
 const buildFinishedGoodDispatchMap = async (selectedDate = '') => {
   const pageSize = 1000;
   const orderMap = new Map();
@@ -1107,6 +1164,7 @@ export const apiService = {
       const purchaseMapPromise = buildFinishedGoodPurchaseMap(selectedDate);
       const returnMapPromise = buildFinishedGoodReturnMap(selectedDate);
       const adjustmentMapPromise = buildFinishedGoodAdjustmentMap(selectedDate);
+      const consumptionMapPromise = buildFinishedGoodConsumptionMap(selectedDate);
       let query = supabase
         .from('finished_goods_inventory_master')
         .select('*')
@@ -1126,11 +1184,12 @@ export const apiService = {
       const purchaseMap = await purchaseMapPromise;
       const returnMap = await returnMapPromise;
       const adjustmentMap = await adjustmentMapPromise;
+      const consumptionMap = await consumptionMapPromise;
       return (data || [])
         .map((item) => {
           const key = `${normalizeFirmKey(item.firm_name)}::${normalizeItemKey(item.product_name)}`;
           
-          let productionQuantity, dispatchQuantity, purchaseQuantity, returnQuantity, adjustmentQuantity;
+          let productionQuantity, dispatchQuantity, purchaseQuantity, returnQuantity, adjustmentQuantity, consumptionQuantity;
 
           if (selectedDate) {
             productionQuantity = productionMap[key]?.after || 0;
@@ -1138,16 +1197,18 @@ export const apiService = {
             purchaseQuantity = purchaseMap[key]?.after || 0;
             returnQuantity = returnMap[key]?.after || 0;
             adjustmentQuantity = adjustmentMap[key]?.after || 0;
+            consumptionQuantity = consumptionMap[key]?.after || 0;
           } else {
             productionQuantity = productionMap[key]?.total || 0;
             dispatchQuantity = dispatchMap[key]?.total || 0;
             purchaseQuantity = purchaseMap[key]?.total || 0;
             returnQuantity = returnMap[key]?.total || 0;
             adjustmentQuantity = adjustmentMap[key]?.total || 0;
+            consumptionQuantity = consumptionMap[key]?.total || 0;
           }
 
           const pendingOrderQuantity = pendingOrderMap[key];
-          const hasCurrentLevelSync = productionQuantity !== undefined || dispatchQuantity !== undefined || purchaseQuantity !== undefined || returnQuantity !== undefined || adjustmentQuantity !== undefined;
+          const hasCurrentLevelSync = productionQuantity !== undefined || dispatchQuantity !== undefined || purchaseQuantity !== undefined || returnQuantity !== undefined || adjustmentQuantity !== undefined || consumptionQuantity !== undefined;
           const opStock = numberOrZero(item.op_stock);
 
           return {
@@ -1159,8 +1220,9 @@ export const apiService = {
             production: productionQuantity !== undefined ? productionQuantity : item.production,
             sales: dispatchQuantity !== undefined ? dispatchQuantity : item.sales,
             sales_return: returnQuantity !== undefined ? returnQuantity : item.sales_return,
+            consumption: consumptionQuantity !== undefined ? consumptionQuantity : item.consumption,
             current_level: hasCurrentLevelSync
-              ? opStock + purchaseQuantity + productionQuantity + adjustmentQuantity - dispatchQuantity + returnQuantity
+              ? opStock + purchaseQuantity + productionQuantity + adjustmentQuantity - dispatchQuantity + returnQuantity - consumptionQuantity
               : item.current_level,
             _hasCurrentLevelSync: hasCurrentLevelSync
           };

@@ -171,19 +171,29 @@ const BranchInventory = () => {
   const addOptimumStock = useWatch({ control: addControl, name: 'optimum_stock' });
   const addActualLevel = useWatch({ control: addControl, name: 'actual_level' });
   const addProductRate = useWatch({ control: addControl, name: 'product_rate' });
+  const addAnnuCon = useWatch({ control: addControl, name: 'annu_con' });
   const editOptimumStock = useWatch({ control: editControl, name: 'optimum_stock' });
   const editActualLevel = useWatch({ control: editControl, name: 'actual_level' });
   const editProductRate = useWatch({ control: editControl, name: 'product_rate' });
+  const editAnnuCon = useWatch({ control: editControl, name: 'annu_con' });
 
   useEffect(() => {
     setAddValue('optimum_stock_total', calculateOptimumStockTotal(addOptimumStock, addProductRate));
     setAddValue('stock_total', calculateStockTotal(addActualLevel, addProductRate));
-  }, [addOptimumStock, addActualLevel, addProductRate, setAddValue]);
+    const annuVal = toFiniteNumber(addAnnuCon);
+    if (annuVal !== null && annuVal !== undefined) {
+      setAddValue('d_con', Number((annuVal / 300).toFixed(3)));
+    }
+  }, [addOptimumStock, addActualLevel, addProductRate, addAnnuCon, setAddValue]);
 
   useEffect(() => {
     setEditValue('optimum_stock_total', calculateOptimumStockTotal(editOptimumStock, editProductRate));
     setEditValue('stock_total', calculateStockTotal(editActualLevel, editProductRate));
-  }, [editOptimumStock, editActualLevel, editProductRate, setEditValue]);
+    const annuVal = toFiniteNumber(editAnnuCon);
+    if (annuVal !== null && annuVal !== undefined) {
+      setEditValue('d_con', Number((annuVal / 300).toFixed(3)));
+    }
+  }, [editOptimumStock, editActualLevel, editProductRate, editAnnuCon, setEditValue]);
 
   const fetchTransfers = async () => {
     setTransfersLoading(true);
@@ -397,7 +407,7 @@ const BranchInventory = () => {
     { header: 'Item Name', accessor: 'item_name' },
     { header: 'Unit', accessor: 'unit' },
     { header: 'Annu. Con', accessor: 'annu_con', render: (row) => renderRawNumber(row.annu_con) },
-    // { header: 'D. Con', accessor: 'd_con', render: (row) => renderRawNumber(row.d_con) },
+    { header: 'D. Con', accessor: 'd_con', render: (row) => row.d_con !== null && row.d_con !== undefined && row.d_con !== '' ? Number(row.d_con).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 3 }) : '' },
     { header: 'S.F', accessor: 'sf', render: (row) => renderRawNumber(row.sf) },
     { header: 'Lead Time', accessor: 'lead_time', render: (row) => row.lead_time !== null && row.lead_time !== undefined && row.lead_time !== '' ? `${Number(row.lead_time).toLocaleString()} days` : '' },
     { header: 'Max Stock', accessor: 'max_stock', render: (row) => renderRawNumber(row.max_stock) },
@@ -426,9 +436,10 @@ const BranchInventory = () => {
       header: 'Actual Level', 
       accessor: 'actual_level', 
       cellClassName: (row) => {
-        if (row.colour === 'Low') return 'bg-rose-600/90 text-white font-bold';
-        if (row.colour === 'Optimum') return 'bg-emerald-600/90 text-white font-bold';
-        if (row.colour === 'Extra') return 'bg-amber-500/90 text-slate-950 font-bold';
+        if (row.colour === 'Red') return 'bg-gradient-to-r from-red-500/90 to-rose-600/90 text-white font-bold';
+        if (row.colour === 'Orange') return 'bg-gradient-to-r from-amber-500/90 to-orange-500/90 text-white font-bold';
+        if (row.colour === 'Green') return 'bg-gradient-to-r from-emerald-500/90 to-teal-600/90 text-white font-bold';
+        if (row.colour === 'Purple') return 'bg-gradient-to-r from-indigo-500/90 to-purple-600/90 text-white font-bold';
         return '';
       },
       render: (row) => row.actual_level !== null && row.actual_level !== undefined && row.actual_level !== '' ? Number(row.actual_level).toLocaleString() : ''
@@ -440,9 +451,10 @@ const BranchInventory = () => {
       header: 'Colour', 
       accessor: 'colour',
       cellClassName: (row) => {
-        if (row.colour === 'Low') return 'bg-rose-600/90 text-white font-bold text-center uppercase tracking-wider text-[11px]';
-        if (row.colour === 'Optimum') return 'bg-emerald-600/90 text-white font-bold text-center uppercase tracking-wider text-[11px]';
-        if (row.colour === 'Extra') return 'bg-amber-500/90 text-slate-950 font-bold text-center uppercase tracking-wider text-[11px]';
+        if (row.colour === 'Red') return 'bg-gradient-to-r from-red-500/90 to-rose-600/90 text-white font-bold text-center uppercase tracking-wider text-[11px]';
+        if (row.colour === 'Orange') return 'bg-gradient-to-r from-amber-500/90 to-orange-500/90 text-white font-bold text-center uppercase tracking-wider text-[11px]';
+        if (row.colour === 'Green') return 'bg-gradient-to-r from-emerald-500/90 to-teal-600/90 text-white font-bold text-center uppercase tracking-wider text-[11px]';
+        if (row.colour === 'Purple') return 'bg-gradient-to-r from-indigo-500/90 to-purple-600/90 text-white font-bold text-center uppercase tracking-wider text-[11px]';
         return 'text-center';
       },
       render: (row) => row.colour || '-'
@@ -474,16 +486,22 @@ const BranchInventory = () => {
         : item.actual_level;
       const actual = adjustedActualLevel != null ? Number(adjustedActualLevel) : null;
       const optimum = item.optimum_stock != null ? Number(item.optimum_stock) : null;
-      const max = item.max_stock != null ? Number(item.max_stock) : null;
+
+      // Calculate D. Con dynamically (Annu. Con / 300)
+      const annual = item.annu_con != null ? Number(item.annu_con) : null;
+      const calculatedDCon = (annual !== null && !isNaN(annual)) ? (annual / 300) : (item.d_con != null ? Number(item.d_con) : null);
 
       let status = '';
-      if (actual !== null && optimum !== null && max !== null && optimum !== 0 && max !== 0) {
-        if (actual < optimum) {
-          status = 'Low';
-        } else if (actual >= optimum && actual <= max) {
-          status = 'Optimum';
+      if (actual !== null && optimum !== null && optimum !== 0) {
+        const pct = (actual / optimum) * 100;
+        if (pct < 33) {
+          status = 'Red';
+        } else if (pct >= 33 && pct < 66) {
+          status = 'Orange';
+        } else if (pct >= 66 && pct <= 100) {
+          status = 'Green';
         } else {
-          status = 'Extra';
+          status = 'Purple';
         }
       } else {
         status = item.colour || '';
@@ -493,6 +511,7 @@ const BranchInventory = () => {
         ...item,
         stock_adjustment: firmAdjustment + legacyAdjustment,
         actual_level: adjustedActualLevel,
+        d_con: calculatedDCon,
         colour: status
       };
     });
