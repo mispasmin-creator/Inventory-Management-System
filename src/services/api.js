@@ -358,7 +358,7 @@ const buildFinishedGoodProductionMap = async (selectedDate = '') => {
     for (let from = 0; ; from += pageSize) {
       const { data, error } = await productionSupabase
         .from('actual_production')
-        .select('id, "FIRM Name", "Product Name", "Quantity Of FG", "Timestamp", "Job Card No."')
+        .select('id, "FIRM Name", "Product Name", "Quantity Of FG", "Timestamp", "Date Of Production", "Job Card No."')
         .order('id', { ascending: false })
         .range(from, from + pageSize - 1);
 
@@ -377,7 +377,7 @@ const buildFinishedGoodProductionMap = async (selectedDate = '') => {
           productionMap[key] = { before: 0, after: 0, total: 0 };
         }
 
-        const rowDate = getLocalDateString(row.Timestamp);
+        const rowDate = getLocalDateString(row['Date Of Production'] || row.Timestamp);
         productionMap[key].total += quantity;
         if (selectedDate && rowDate && rowDate >= selectedDate) {
           productionMap[key].after += quantity;
