@@ -3,7 +3,7 @@ import { useParams, useLocation } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { useInventory } from '../hooks/useInventory';
 import { apiService } from '../services/api';
-import { purchaseSupabase, supabase } from '../services/supabaseClient';
+import { purchaseSupabase, supabase, productionSupabase } from '../services/supabaseClient';
 import Table from '../components/Table';
 import Modal from '../components/Modal';
 import GlassCard from '../components/GlassCard';
@@ -177,6 +177,23 @@ const BranchInventory = () => {
 
     return () => {
       purchaseSupabase.removeChannel(purchaseReturnsChannel);
+    };
+  }, [activeBranch, type, canReadActiveBranch, fetchInventory, selectedDate]);
+
+  useEffect(() => {
+    if (!activeBranch || !canReadActiveBranch) return undefined;
+
+    const crushingChannel = productionSupabase
+      .channel(`crushing-actual-inventory-${activeBranch}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'crushing_actual' },
+        () => fetchInventory(activeBranch, type, type === 'finish_good' ? selectedDate : INVENTORY_START_DATE)
+      )
+      .subscribe();
+
+    return () => {
+      productionSupabase.removeChannel(crushingChannel);
     };
   }, [activeBranch, type, canReadActiveBranch, fetchInventory, selectedDate]);
 
@@ -366,6 +383,19 @@ const BranchInventory = () => {
 
   const isNonZero = (val) => val !== null && val !== undefined && val !== '' && Number(val) !== 0;
 
+  const getTintedCellClass = (val, colorType) => {
+    const hasValue = isNonZero(val);
+    if (colorType === 'emerald') {
+      return hasValue
+        ? 'bg-emerald-500/20 !text-slate-950 dark:!text-white font-black text-[13px]'
+        : 'bg-emerald-500/15 text-emerald-600/80 dark:text-emerald-400/80 font-normal';
+    } else {
+      return hasValue
+        ? 'bg-rose-500/20 !text-slate-950 dark:!text-white font-black text-[13px]'
+        : 'bg-rose-500/15 text-rose-600/80 dark:text-rose-400/80 font-normal';
+    }
+  };
+
   const getColourForStatus = (status) => {
     if (!status) return '';
     const s = String(status).trim().toLowerCase();
@@ -386,37 +416,37 @@ const BranchInventory = () => {
     { 
       header: 'Purchase Material Received', 
       accessor: 'purchase_material_received', 
-      cellClassName: () => 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 font-bold',
+      cellClassName: (row) => getTintedCellClass(row.purchase_material_received, 'emerald'),
       render: (row) => renderFinishGoodNumber(row.purchase_material_received)
     },
     { 
       header: 'Purchase Return', 
       accessor: 'purchase_return', 
-      cellClassName: () => 'bg-rose-500/15 text-rose-600 dark:text-rose-400 font-bold',
+      cellClassName: (row) => getTintedCellClass(row.purchase_return, 'rose'),
       render: (row) => renderFinishGoodNumber(row.purchase_return)
     },
     { 
       header: 'Production', 
       accessor: 'production', 
-      cellClassName: () => 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 font-bold',
+      cellClassName: (row) => getTintedCellClass(row.production, 'emerald'),
       render: (row) => renderFinishGoodNumber(row.production)
     },
     { 
       header: 'Sales', 
       accessor: 'sales', 
-      cellClassName: () => 'bg-rose-500/15 text-rose-600 dark:text-rose-400 font-bold',
+      cellClassName: (row) => getTintedCellClass(row.sales, 'rose'),
       render: (row) => renderFinishGoodNumber(row.sales)
     },
     { 
       header: 'Sales Return', 
       accessor: 'sales_return', 
-      cellClassName: () => 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 font-bold',
+      cellClassName: (row) => getTintedCellClass(row.sales_return, 'emerald'),
       render: (row) => renderFinishGoodNumber(row.sales_return)
     },
     { 
       header: 'Consumption', 
       accessor: 'consumption', 
-      cellClassName: () => 'bg-rose-500/15 text-rose-600 dark:text-rose-400 font-bold',
+      cellClassName: (row) => getTintedCellClass(row.consumption, 'rose'),
       render: (row) => renderFinishGoodNumber(row.consumption)
     },
     { 
@@ -424,14 +454,20 @@ const BranchInventory = () => {
       accessor: 'current_level', 
       cellClassName: (row) => {
         const hasShortage = Number(row.current_level || 0) < Number(row.sales_order_pending || 0);
-        return hasShortage ? 'bg-rose-600/90 text-white font-bold' : 'bg-emerald-600/90 text-white font-bold';
+        return hasShortage
+          ? 'bg-gradient-to-r from-red-500/95 to-rose-600/95 text-white font-bold shadow-sm'
+          : 'bg-gradient-to-r from-emerald-500/95 to-teal-600/95 text-white font-bold shadow-sm';
       },
       render: (row) => row.current_level !== null && row.current_level !== undefined && row.current_level !== '' ? Number(row.current_level).toLocaleString() : '-'
     },
   ];
 
   const renderRawNumber = (value) => value !== null && value !== undefined && value !== '' ? Math.abs(Number(value)).toLocaleString() : '';
-  const renderRawCurrency = (value) => value !== null && value !== undefined && value !== '' ? `₹${Math.abs(Number(value)).toLocaleString()}` : '';
+  const renderRawCurrency = (value) => {
+    const num = (value !== null && value !== undefined && value !== '' && value !== '-') ? Number(value) : 0;
+    const cleanNum = Number.isFinite(num) ? Math.abs(num) : 0;
+    return `₹${cleanNum.toLocaleString()}`;
+  };
 
   // Raw Material Columns
   const rawMaterialColumns = [
@@ -450,19 +486,22 @@ const BranchInventory = () => {
     { 
       header: 'Purchase System', 
       accessor: 'purchase_system', 
-      cellClassName: () => 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 font-bold',
+      cellClassName: (row) => getTintedCellClass(row.purchase_system, 'emerald'),
       render: (row) => renderRawNumber(row.purchase_system)
     },
     { 
       header: 'Production Consumption', 
       accessor: 'production_consumption', 
-      cellClassName: () => 'bg-rose-500/15 text-rose-600 dark:text-rose-400 font-bold',
+      cellClassName: (row) => {
+        const val = Number(row.production_consumption || 0);
+        return getTintedCellClass(row.production_consumption, val >= 0 ? 'emerald' : 'rose');
+      },
       render: (row) => renderRawNumber(row.production_consumption)
     },
     { 
       header: 'Raw Material Sales', 
       accessor: 'raw_material_sales', 
-      cellClassName: () => 'bg-rose-500/15 text-rose-600 dark:text-rose-400 font-bold',
+      cellClassName: (row) => getTintedCellClass(row.raw_material_sales, 'rose'),
       render: (row) => renderRawNumber(row.raw_material_sales)
     },
     { 
@@ -470,11 +509,11 @@ const BranchInventory = () => {
       accessor: 'actual_level', 
       cellClassName: (row) => {
         const color = getColourForStatus(row.colour);
-        if (color === 'Red') return 'bg-gradient-to-r from-red-500/90 to-rose-600/90 text-white font-bold';
-        if (color === 'Orange') return 'bg-gradient-to-r from-amber-500/90 to-orange-500/90 text-white font-bold';
-        if (color === 'Green') return 'bg-gradient-to-r from-emerald-500/90 to-teal-600/90 text-white font-bold';
-        if (color === 'Purple') return 'bg-gradient-to-r from-indigo-500/90 to-purple-600/90 text-white font-bold';
-        return '';
+        if (color === 'Red') return 'bg-rose-500/10 text-rose-700 dark:text-rose-300 font-black';
+        if (color === 'Orange') return 'bg-amber-500/10 text-amber-700 dark:text-amber-300 font-black';
+        if (color === 'Green') return 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 font-black';
+        if (color === 'Purple') return 'bg-purple-500/10 text-purple-700 dark:text-purple-300 font-black';
+        return 'font-bold text-(--ink)';
       },
       render: (row) => row.actual_level !== null && row.actual_level !== undefined && row.actual_level !== '' ? Number(row.actual_level).toLocaleString() : ''
     },
@@ -486,11 +525,11 @@ const BranchInventory = () => {
       accessor: 'colour',
       cellClassName: (row) => {
         const color = getColourForStatus(row.colour);
-        if (color === 'Red') return 'bg-gradient-to-r from-red-500/90 to-rose-600/90 text-white font-bold text-center uppercase tracking-wider text-[11px]';
-        if (color === 'Orange') return 'bg-gradient-to-r from-amber-500/90 to-orange-500/90 text-white font-bold text-center uppercase tracking-wider text-[11px]';
-        if (color === 'Green') return 'bg-gradient-to-r from-emerald-500/90 to-teal-600/90 text-white font-bold text-center uppercase tracking-wider text-[11px]';
-        if (color === 'Purple') return 'bg-gradient-to-r from-indigo-500/90 to-purple-600/90 text-white font-bold text-center uppercase tracking-wider text-[11px]';
-        return 'text-center';
+        if (color === 'Red') return 'bg-rose-500/15 text-rose-700 dark:text-rose-300 font-bold text-center uppercase tracking-wider text-[11px]';
+        if (color === 'Orange') return 'bg-amber-500/15 text-amber-700 dark:text-amber-300 font-bold text-center uppercase tracking-wider text-[11px]';
+        if (color === 'Green') return 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 font-bold text-center uppercase tracking-wider text-[11px]';
+        if (color === 'Purple') return 'bg-purple-500/15 text-purple-700 dark:text-purple-300 font-bold text-center uppercase tracking-wider text-[11px]';
+        return 'text-center text-slate-500 font-medium text-xs';
       },
       render: (row) => row.colour || '-'
     },

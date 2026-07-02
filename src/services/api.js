@@ -311,6 +311,7 @@ const buildCrushingActualLevelMap = async (selectedDate = '') => {
   const crushingGrainsMap = {};
   const crushingFinesMap = {};
   const crushingLumpsMap = {};
+  const crushingOutputsMap = {};
 
   try {
     for (let from = 0; ; from += pageSize) {
@@ -327,28 +328,45 @@ const buildCrushingActualLevelMap = async (selectedDate = '') => {
         if (selectedDate && (!rowDate || rowDate < selectedDate)) return;
 
         const firmKey = normalizeFirmKey(normalizeProductionFirmName(row['Firm Name']));
+        if (!firmKey) return;
+
+        // Process Input Product (if available and valid)
         const productName = row['Crushing Product Name'];
         const productKey = normalizeItemKey(productName);
         const rawQuantity = row['Qty Of Crushing Product'];
         const quantity = Number(rawQuantity);
-        if (!firmKey || !productKey || rawQuantity === null || rawQuantity === '' || !Number.isFinite(quantity)) return;
 
-        const productText = String(productName || '').toLowerCase();
-        const signedQuantity = productText.includes('grains') || productText.includes('fines')
-          ? quantity
-          : productText.includes('lumps') || productText.includes('fired')
-            ? -quantity
-            : 0;
-        if (signedQuantity === 0) return;
+        if (productKey && rawQuantity !== null && rawQuantity !== '' && Number.isFinite(quantity)) {
+          const productText = String(productName || '').toLowerCase();
+          const signedQuantity = productText.includes('grains') || productText.includes('fines')
+            ? quantity
+            : productText.includes('lumps') || productText.includes('fired')
+              ? -quantity
+              : 0;
+          if (signedQuantity !== 0) {
+            const key = `${firmKey}::${productKey}`;
+            crushingAdjustmentMap[key] = (crushingAdjustmentMap[key] || 0) + signedQuantity;
+            if (productText.includes('grains')) {
+              crushingGrainsMap[key] = (crushingGrainsMap[key] || 0) + signedQuantity;
+            } else if (productText.includes('fines')) {
+              crushingFinesMap[key] = (crushingFinesMap[key] || 0) + signedQuantity;
+            } else if (productText.includes('lumps') || productText.includes('fired')) {
+              crushingLumpsMap[key] = (crushingLumpsMap[key] || 0) + signedQuantity;
+            }
+          }
+        }
 
-        const key = `${firmKey}::${productKey}`;
-        crushingAdjustmentMap[key] = (crushingAdjustmentMap[key] || 0) + signedQuantity;
-        if (productText.includes('grains')) {
-          crushingGrainsMap[key] = (crushingGrainsMap[key] || 0) + signedQuantity;
-        } else if (productText.includes('fines')) {
-          crushingFinesMap[key] = (crushingFinesMap[key] || 0) + signedQuantity;
-        } else if (productText.includes('lumps') || productText.includes('fired')) {
-          crushingLumpsMap[key] = (crushingLumpsMap[key] || 0) + signedQuantity;
+        // Process Finished Goods Outputs (1 to 4)
+        for (let i = 1; i <= 4; i++) {
+          const fgName = row[`Finished Goods Name ${i}`];
+          const fgQtyRaw = row[`Qty ${i}`];
+          const fgQty = Number(fgQtyRaw);
+          const fgKey = normalizeItemKey(fgName);
+
+          if (!fgKey || fgQtyRaw === null || fgQtyRaw === '' || !Number.isFinite(fgQty)) continue;
+
+          const fgMapKey = `${firmKey}::${fgKey}`;
+          crushingOutputsMap[fgMapKey] = (crushingOutputsMap[fgMapKey] || 0) + fgQty;
         }
       });
 
@@ -362,7 +380,8 @@ const buildCrushingActualLevelMap = async (selectedDate = '') => {
     crushingAdjustmentMap,
     crushingGrainsMap,
     crushingFinesMap,
-    crushingLumpsMap
+    crushingLumpsMap,
+    crushingOutputsMap
   };
 };
 
@@ -406,6 +425,51 @@ const buildFinishedGoodProductionMap = async (selectedDate = '') => {
     }
   } catch (error) {
     console.warn('Supabase finished good production sync failed:', error.message);
+  }
+
+  // Fetch crushing_actual outputs for finished goods production
+  try {
+    for (let from = 0; ; from += pageSize) {
+      const { data, error } = await productionSupabase
+        .from('crushing_actual')
+        .select('id, "Timestamp", "Date Of Production", "Firm Name", "Finished Goods Name 1", "Qty 1", "Finished Goods Name 2", "Qty 2", "Finished Goods Name 3", "Qty 3", "Finished Goods Name 4", "Qty 4"')
+        .order('id', { ascending: false })
+        .range(from, from + pageSize - 1);
+
+      if (error) throw error;
+
+      (data || []).forEach((row) => {
+        const firmKey = normalizeFirmKey(normalizeProductionFirmName(row['Firm Name']));
+        if (!firmKey) return;
+
+        const rowDate = getLocalDateString(row['Date Of Production'] || row.Timestamp);
+
+        for (let i = 1; i <= 4; i++) {
+          const fgName = row[`Finished Goods Name ${i}`];
+          const fgQtyRaw = row[`Qty ${i}`];
+          const fgQty = Number(fgQtyRaw);
+          const fgKey = normalizeItemKey(fgName);
+
+          if (!fgKey || fgQtyRaw === null || fgQtyRaw === '' || !Number.isFinite(fgQty)) continue;
+
+          const key = `${firmKey}::${fgKey}`;
+          if (!productionMap[key]) {
+            productionMap[key] = { before: 0, after: 0, total: 0 };
+          }
+
+          productionMap[key].total += fgQty;
+          if (selectedDate && rowDate && rowDate >= selectedDate) {
+            productionMap[key].after += fgQty;
+          } else {
+            productionMap[key].before += fgQty;
+          }
+        }
+      });
+
+      if (!data || data.length < pageSize) break;
+    }
+  } catch (error) {
+    console.warn('Supabase finished good crushing production sync failed:', error.message);
   }
 
   return productionMap;
@@ -877,7 +941,7 @@ const buildLiftDataMaps = async (selectedDate = '') => {
     const [
       { usageMap: productionUsageMap, annualUsageMap: annualProductionUsageMap },
       { semiAdjustmentMap, semiGrainsMap, semiFinesMap },
-      { crushingAdjustmentMap, crushingGrainsMap, crushingFinesMap, crushingLumpsMap }
+      { crushingAdjustmentMap, crushingGrainsMap, crushingFinesMap, crushingLumpsMap, crushingOutputsMap }
     ] = await Promise.all([
       buildProductionUsageMap(selectedDate),
       buildSemiFinishedActualLevelMap(selectedDate),
@@ -890,6 +954,9 @@ const buildLiftDataMaps = async (selectedDate = '') => {
       actualQuantityMap[key] = (actualQuantityMap[key] || 0) + quantity;
     });
     Object.entries(crushingAdjustmentMap).forEach(([key, quantity]) => {
+      actualQuantityMap[key] = (actualQuantityMap[key] || 0) + quantity;
+    });
+    Object.entries(crushingOutputsMap).forEach(([key, quantity]) => {
       actualQuantityMap[key] = (actualQuantityMap[key] || 0) + quantity;
     });
 
@@ -935,7 +1002,8 @@ const buildLiftDataMaps = async (selectedDate = '') => {
       semiFinesMap,
       crushingGrainsMap,
       crushingFinesMap,
-      crushingLumpsMap
+      crushingLumpsMap,
+      crushingOutputsMap
     };
   } catch (error) {
     console.warn('Supabase purchase tables data sync failed:', error.message);
@@ -949,7 +1017,8 @@ const buildLiftDataMaps = async (selectedDate = '') => {
       semiFinesMap: {},
       crushingGrainsMap: {},
       crushingFinesMap: {},
-      crushingLumpsMap: {}
+      crushingLumpsMap: {},
+      crushingOutputsMap: {}
     };
   }
 };
@@ -1090,7 +1159,8 @@ export const apiService = {
           semiFinesMap,
           crushingGrainsMap,
           crushingFinesMap,
-          crushingLumpsMap
+          crushingLumpsMap,
+          crushingOutputsMap
         },
         salesRawOrdersResult
       ] = await Promise.all([
@@ -1170,12 +1240,13 @@ export const apiService = {
             optimum_stock: optimumStock,
             op_stock: opStock,
             purchase_system: purchaseQuantityMap[key] || 0,
-            production_consumption: -(productionUsageMap[key] || 0) + (semiGrainsMap[key] || 0) + (semiFinesMap[key] || 0) + (crushingGrainsMap[key] || 0) + (crushingLumpsMap[key] || 0),
+            production_consumption: -(productionUsageMap[key] || 0) + (semiGrainsMap[key] || 0) + (semiFinesMap[key] || 0) + (crushingGrainsMap[key] || 0) + (crushingLumpsMap[key] || 0) + (crushingOutputsMap[key] || 0),
             semi_grains: semiGrainsMap[key] || 0,
             semi_fines: semiFinesMap[key] || 0,
             crushing_grains: crushingGrainsMap[key] || 0,
             crushing_fines: crushingFinesMap[key] || 0,
             crushing_lumps: crushingLumpsMap[key] || 0,
+            crushing_outputs: crushingOutputsMap[key] || 0,
             raw_material_sales: -salesRawQty,
             actual_level: actualLevel,
             product_rate: rate,
