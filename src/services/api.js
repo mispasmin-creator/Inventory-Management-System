@@ -1322,13 +1322,15 @@ export const apiService = {
           const key = `${normalizeFirmKey(item.firm_name)}::${normalizeItemKey(item.product_name)}`;
           
           let productionQuantity, dispatchQuantity, purchaseQuantity, returnQuantity, adjustmentQuantity, consumptionQuantity, purchaseReturnQuantity;
+          let adjustmentQuantityForCurrentLevel;
 
           if (selectedDate) {
             productionQuantity = productionMap[key]?.after || 0;
             dispatchQuantity = dispatchMap[key]?.after || 0;
             purchaseQuantity = purchaseMap[key]?.after || 0;
             returnQuantity = returnMap[key]?.after || 0;
-            adjustmentQuantity = adjustmentMap[key]?.after || 0;
+            adjustmentQuantity = adjustmentMap[key]?.total || 0;
+            adjustmentQuantityForCurrentLevel = adjustmentMap[key]?.after || 0;
             consumptionQuantity = consumptionMap[key]?.after || 0;
             purchaseReturnQuantity = purchaseReturnMap[key]?.after || 0;
           } else {
@@ -1337,6 +1339,7 @@ export const apiService = {
             purchaseQuantity = purchaseMap[key]?.total || 0;
             returnQuantity = returnMap[key]?.total || 0;
             adjustmentQuantity = adjustmentMap[key]?.total || 0;
+            adjustmentQuantityForCurrentLevel = adjustmentMap[key]?.total || 0;
             consumptionQuantity = consumptionMap[key]?.total || 0;
             purchaseReturnQuantity = purchaseReturnMap[key]?.total || 0;
           }
@@ -1357,7 +1360,7 @@ export const apiService = {
             consumption: consumptionQuantity !== undefined ? consumptionQuantity : item.consumption,
             purchase_return: purchaseReturnQuantity !== undefined ? purchaseReturnQuantity : item.purchase_return,
             current_level: hasCurrentLevelSync
-              ? opStock + purchaseQuantity + productionQuantity + adjustmentQuantity - dispatchQuantity + returnQuantity - consumptionQuantity - purchaseReturnQuantity
+              ? opStock + purchaseQuantity + productionQuantity + adjustmentQuantityForCurrentLevel - dispatchQuantity + returnQuantity - consumptionQuantity - purchaseReturnQuantity
               : item.current_level,
             _hasCurrentLevelSync: hasCurrentLevelSync
           };

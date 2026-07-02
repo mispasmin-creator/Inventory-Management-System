@@ -258,8 +258,7 @@ const BranchInventory = () => {
     try {
       const { data, error } = await supabase
         .from('stock_adjustment')
-        .select('firm_name, item_name, qty, status, material_type, entry_date')
-        .gte('entry_date', INVENTORY_START_DATE);
+        .select('firm_name, item_name, qty, status, material_type, entry_date');
 
       if (error) throw error;
       setRawFactoryEntries(data || []);
@@ -538,8 +537,26 @@ const BranchInventory = () => {
   // Process data to compute status for each row
   const processedInventoryItems = React.useMemo(() => {
     if (type !== 'raw_material') return inventoryItems;
-    const rawAdjustments = rawFactoryEntries.filter(entry => !entry.material_type || entry.material_type === 'raw_material');
-    const adjustmentByItem = rawAdjustments.reduce((acc, entry) => {
+
+    // For display in Stock Adjustment column: sum of all adjustments
+    const rawAdjustmentsTotal = rawFactoryEntries.filter(entry => !entry.material_type || entry.material_type === 'raw_material');
+    const adjustmentByItemTotal = rawAdjustmentsTotal.reduce((acc, entry) => {
+      const firmKey = entry.firm_name?.trim().toLowerCase() || '*';
+      const itemKey = entry.item_name?.trim().toLowerCase();
+      if (!itemKey) return acc;
+
+      const qty = Number(entry.qty || 0);
+      const key = `${firmKey}::${itemKey}`;
+      acc[key] = (acc[key] || 0) + (entry.status === 'Factory -' ? -qty : qty);
+      return acc;
+    }, {});
+
+    // For calculation of actual_level: only adjustments on or after INVENTORY_START_DATE
+    const rawAdjustmentsAfter = rawFactoryEntries.filter(entry => 
+      (!entry.material_type || entry.material_type === 'raw_material') &&
+      entry.entry_date && entry.entry_date >= INVENTORY_START_DATE
+    );
+    const adjustmentByItemAfter = rawAdjustmentsAfter.reduce((acc, entry) => {
       const firmKey = entry.firm_name?.trim().toLowerCase() || '*';
       const itemKey = entry.item_name?.trim().toLowerCase();
       if (!itemKey) return acc;
@@ -553,10 +570,15 @@ const BranchInventory = () => {
     return inventoryItems.map(item => {
       const firmKey = item.firm_name?.trim().toLowerCase();
       const itemKey = item.item_name?.trim().toLowerCase();
-      const firmAdjustment = adjustmentByItem[`${firmKey}::${itemKey}`] || 0;
-      const legacyAdjustment = adjustmentByItem[`*::${itemKey}`] || 0;
+      
+      const firmAdjustmentTotal = adjustmentByItemTotal[`${firmKey}::${itemKey}`] || 0;
+      const legacyAdjustmentTotal = adjustmentByItemTotal[`*::${itemKey}`] || 0;
+
+      const firmAdjustmentAfter = adjustmentByItemAfter[`${firmKey}::${itemKey}`] || 0;
+      const legacyAdjustmentAfter = adjustmentByItemAfter[`*::${itemKey}`] || 0;
+
       const adjustedActualLevel = item.actual_level != null
-        ? Number(item.actual_level) + firmAdjustment + legacyAdjustment
+        ? Number(item.actual_level) + firmAdjustmentAfter + legacyAdjustmentAfter
         : item.actual_level;
       const actual = adjustedActualLevel != null ? Number(adjustedActualLevel) : null;
       const optimum = item.optimum_stock != null ? Number(item.optimum_stock) : null;
@@ -600,7 +622,7 @@ const BranchInventory = () => {
 
       return {
         ...item,
-        stock_adjustment: firmAdjustment + legacyAdjustment,
+        stock_adjustment: firmAdjustmentTotal + legacyAdjustmentTotal,
         actual_level: adjustedActualLevel,
         d_con: calculatedDCon,
         colour: status
