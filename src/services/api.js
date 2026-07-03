@@ -605,7 +605,7 @@ const buildFinishedGoodDispatchMap = async (selectedDate = '') => {
     for (let from = 0; ; from += pageSize) {
       const { data, error } = await orderSupabase
         .from('DISPATCH')
-        .select('id, po_id, "Product Name", "Qty To Be Dispatched", "Actual Truck Qty", "Planned4", "Actual4"')
+        .select('id, po_id, "Product Name", "Qty To Be Dispatched", "Actual Truck Qty", "Planned4", "Actual4", "Bill Date"')
         .not('Planned4', 'is', null)
         .not('Actual4', 'is', null)
         .range(from, from + pageSize - 1);
@@ -613,7 +613,7 @@ const buildFinishedGoodDispatchMap = async (selectedDate = '') => {
       if (error) throw error;
 
       (data || []).forEach((row) => {
-        const invoiceActualizedAt = String(row.Actual4 || '').trim();
+        const invoiceActualizedAt = String(row['Bill Date'] || row.Actual4 || '').trim();
         if (!invoiceActualizedAt) return;
 
         const po = orderMap.get(normalizeJoinId(row.po_id)) || {};

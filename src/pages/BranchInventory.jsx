@@ -483,11 +483,12 @@ const BranchInventory = () => {
       accessor: 'actual_level', 
       cellClassName: (row) => {
         const color = getColourForStatus(row.colour);
-        if (color === 'Red') return 'bg-rose-500/10 text-rose-700 dark:text-rose-300 font-black';
-        if (color === 'Orange') return 'bg-amber-500/10 text-amber-700 dark:text-amber-300 font-black';
-        if (color === 'Green') return 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 font-black';
-        if (color === 'Purple') return 'bg-purple-500/10 text-purple-700 dark:text-purple-300 font-black';
-        return 'font-bold text-(--ink)';
+        const base = 'text-[14px] font-black tracking-wide text-white';
+        if (color === 'Red') return `${base} bg-gradient-to-br from-rose-400 to-rose-600`;
+        if (color === 'Orange') return `${base} bg-gradient-to-br from-amber-400 to-amber-600`;
+        if (color === 'Green') return `${base} bg-gradient-to-br from-emerald-400 to-emerald-600`;
+        if (color === 'Purple') return `${base} bg-gradient-to-br from-purple-400 to-purple-600`;
+        return 'text-[14px] font-black tracking-wide bg-gradient-to-br from-slate-200 to-slate-300 text-slate-800 dark:from-slate-700 dark:to-slate-800 dark:text-slate-100';
       },
       render: (row) => row.actual_level !== null && row.actual_level !== undefined && row.actual_level !== '' ? Number(row.actual_level).toLocaleString() : ''
     },
