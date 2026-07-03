@@ -8,16 +8,19 @@ const INVENTORY_START_DATE = '2026-06-23';
 export const useInventory = () => {
   const [loading, setLoading] = useState(false);
   const [inventoryItems, setInventoryItems] = useState([]);
+  const [totalCount, setTotalCount] = useState(0);
   const { showSuccess, showError } = useToast();
   const { user } = useAuth();
 
-  const fetchInventory = useCallback(async (branch, type = 'raw_material', dateFilter = INVENTORY_START_DATE) => {
+  const fetchInventory = useCallback(async (branch, type = 'raw_material', dateFilter = INVENTORY_START_DATE, page = 1, pageSize = 100, searchQuery = '', firmFilter = '') => {
     setLoading(true);
     try {
-      const data = type === 'finish_good'
-        ? await apiService.getFinishGoodInventory(branch, dateFilter)
-        : await apiService.getInventory(branch, dateFilter);
-      setInventoryItems(data);
+      const response = type === 'finish_good'
+        ? await apiService.getFinishGoodInventory(branch, dateFilter, page, pageSize, searchQuery, firmFilter)
+        : await apiService.getInventory(branch, dateFilter, page, pageSize, searchQuery, firmFilter);
+      
+      setInventoryItems(response.data || []);
+      setTotalCount(response.count || 0);
     } catch (e) {
       showError(e.message || `Failed to fetch inventory for ${branch}`);
     } finally {
@@ -135,7 +138,8 @@ export const useInventory = () => {
     deleteInventory,
     transferMaterial,
     approveTransfer,
-    rejectTransfer
+    rejectTransfer,
+    totalCount
   };
 };
 export default useInventory;

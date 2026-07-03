@@ -64,7 +64,8 @@ const BranchInventory = () => {
     deleteInventory, 
     transferMaterial, 
     approveTransfer, 
-    rejectTransfer 
+    rejectTransfer,
+    totalCount
   } = useInventory();
   const { showError } = useToast();
 
@@ -76,6 +77,8 @@ const BranchInventory = () => {
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [transferModalOpen, setTransferModalOpen] = useState(false);
   const [selectedItem, setSelectedItem] = useState(null);
+  const [detailsModalOpen, setDetailsModalOpen] = useState(false);
+  const [detailsItem, setDetailsItem] = useState(null);
   
   // Transfers logs
   const [transferRequests, setTransferRequests] = useState([]);
@@ -93,6 +96,21 @@ const BranchInventory = () => {
   const [selectedBranch, setSelectedBranch] = useState(routeBranchName || '');
   const [selectedDate, setSelectedDate] = useState(INVENTORY_START_DATE);
   const isFinishGood = type === 'finish_good';
+
+  // Server-side pagination & filtering state
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(100);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
+  const [firmFilter, setFirmFilter] = useState('');
+
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedSearchQuery(searchQuery);
+      setCurrentPage(1);
+    }, 500);
+    return () => clearTimeout(handler);
+  }, [searchQuery]);
 
   const accessibleBranchOptions = React.useMemo(() => {
     return branchOptions.filter(branch => canAccessBranch(branch, type));
@@ -132,70 +150,19 @@ const BranchInventory = () => {
 
   useEffect(() => {
     if (!activeBranch || !canReadActiveBranch) return;
-    fetchInventory(activeBranch, type, type === 'finish_good' ? selectedDate : INVENTORY_START_DATE);
+    fetchInventory(
+      activeBranch,
+      type,
+      type === 'finish_good' ? selectedDate : INVENTORY_START_DATE,
+      currentPage,
+      pageSize,
+      debouncedSearchQuery,
+      firmFilter
+    );
     fetchTransfers();
-  }, [activeBranch, type, canReadActiveBranch, selectedDate]);
+  }, [activeBranch, type, canReadActiveBranch, selectedDate, currentPage, pageSize, debouncedSearchQuery, firmFilter]);
 
-  useEffect(() => {
-    if (type !== 'raw_material' || !activeBranch || !canReadActiveBranch) return undefined;
 
-    const inventoryChannel = supabase
-      .channel(`inventory-master-${activeBranch}`)
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'inventory_master' },
-        () => fetchInventory(activeBranch, type, INVENTORY_START_DATE)
-      )
-      .subscribe();
-
-    const receiptChannel = purchaseSupabase
-      .channel(`lift-accounts-inventory-${activeBranch}`)
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'LIFT-ACCOUNTS' },
-        () => fetchInventory(activeBranch, type, INVENTORY_START_DATE)
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(inventoryChannel);
-      purchaseSupabase.removeChannel(receiptChannel);
-    };
-  }, [activeBranch, type, canReadActiveBranch, fetchInventory, selectedDate]);
-
-  useEffect(() => {
-    if (type !== 'finish_good' || !activeBranch || !canReadActiveBranch) return undefined;
-
-    const purchaseReturnsChannel = purchaseSupabase
-      .channel(`purchase-returns-finished-goods-${activeBranch}`)
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'Purchase Returns' },
-        () => fetchInventory(activeBranch, type, selectedDate)
-      )
-      .subscribe();
-
-    return () => {
-      purchaseSupabase.removeChannel(purchaseReturnsChannel);
-    };
-  }, [activeBranch, type, canReadActiveBranch, fetchInventory, selectedDate]);
-
-  useEffect(() => {
-    if (!activeBranch || !canReadActiveBranch) return undefined;
-
-    const crushingChannel = productionSupabase
-      .channel(`crushing-actual-inventory-${activeBranch}`)
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'crushing_actual' },
-        () => fetchInventory(activeBranch, type, type === 'finish_good' ? selectedDate : INVENTORY_START_DATE)
-      )
-      .subscribe();
-
-    return () => {
-      productionSupabase.removeChannel(crushingChannel);
-    };
-  }, [activeBranch, type, canReadActiveBranch, fetchInventory, selectedDate]);
 
   useEffect(() => {
     if (type !== 'raw_material') return;
@@ -472,14 +439,22 @@ const BranchInventory = () => {
   const rawMaterialColumns = [
     { header: 'S. No.', accessor: 's_no', render: (row) => row.s_no ?? '' },
     { header: 'Firm Name', accessor: 'firm_name' },
-    { header: 'Item Name', accessor: 'item_name' },
+    { 
+      header: 'Item Name', 
+      accessor: 'item_name',
+      render: (row) => (
+        <button
+          onClick={() => {
+            setDetailsItem(row);
+            setDetailsModalOpen(true);
+          }}
+          className="text-indigo-400 hover:text-indigo-300 font-semibold cursor-pointer text-left focus:outline-none"
+        >
+          {row.item_name}
+        </button>
+      )
+    },
     { header: 'Unit', accessor: 'unit' },
-    { header: 'Annu. Con', accessor: 'annu_con', render: (row) => renderRawNumber(row.annu_con) },
-    { header: 'D. Con', accessor: 'd_con', render: (row) => row.d_con !== null && row.d_con !== undefined && row.d_con !== '' ? Number(row.d_con).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 3 }) : '' },
-    { header: 'S.F', accessor: 'sf', render: (row) => renderRawNumber(row.sf) },
-    { header: 'Lead Time', accessor: 'lead_time', render: (row) => row.lead_time !== null && row.lead_time !== undefined && row.lead_time !== '' ? `${Number(row.lead_time).toLocaleString()} days` : '' },
-    { header: 'Max Stock', accessor: 'max_stock', render: (row) => renderRawNumber(row.max_stock) },
-    { header: 'Optimum Stock', accessor: 'optimum_stock', render: (row) => renderRawNumber(row.optimum_stock) },
     { header: 'OP. Stock', accessor: 'op_stock', render: (row) => renderRawNumber(row.op_stock) },
     { header: 'Stock Adjustment', accessor: 'stock_adjustment', render: (row) => renderRawNumber(row.stock_adjustment) },
     { 
@@ -881,20 +856,27 @@ const BranchInventory = () => {
       {/* Main Tab Renderings */}
       <GlassCard className="p-2 sm:p-6">
         {hasInventoryAccess ? (
-          loading ? (
-            <TableSkeleton rows={10} cols={isFinishGood ? 12 : 15} />
-          ) : (
             <Table
+              isLoading={loading}
               columns={inventoryColumns}
               data={displayedInventoryItems}
-              searchPlaceholder="Search materials by name or colour..."
-              filterKey="colour"
-              filterOptions={['Low', 'Optimum', 'Extra']}
-              filterPlaceholder="Filter Status"
+              searchPlaceholder="Search materials by name..."
               exportFileName={`${activeBranch}_${type}_inventory`}
               disableSorting={true}
+              serverSide={true}
+              serverTotalItems={totalCount}
+              serverCurrentPage={currentPage}
+              serverPageSize={pageSize}
+              onServerPageChange={setCurrentPage}
+              onServerPageSizeChange={(size) => {
+                setPageSize(size);
+                setCurrentPage(1);
+              }}
+              onServerSearchChange={(val) => {
+                setSearchQuery(val);
+                setCurrentPage(1);
+              }}
             />
-          )
         ) : (
           <div className="py-12 text-center text-sm text-slate-400">
             You do not have access to any firm for this inventory type.
@@ -1335,6 +1317,92 @@ const BranchInventory = () => {
             </button>
           </div>
         </form>
+      </Modal>
+
+      {/* MODAL: MATERIAL DETAILS */}
+      <Modal
+        isOpen={detailsModalOpen}
+        onClose={() => {
+          setDetailsModalOpen(false);
+          setDetailsItem(null);
+        }}
+        title={`Material Details: ${detailsItem?.item_name || ''}`}
+      >
+        <div className="space-y-4 text-slate-300">
+          <div className="grid grid-cols-2 gap-4 border-b border-slate-800 pb-4">
+            <div>
+              <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Item Name</div>
+              <div className="text-sm font-bold text-slate-100 mt-0.5">{detailsItem?.item_name || '-'}</div>
+            </div>
+            <div>
+              <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Firm Name</div>
+              <div className="text-sm font-bold text-slate-100 mt-0.5">{detailsItem?.firm_name || '-'}</div>
+            </div>
+          </div>
+          
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-y-4 gap-x-6 py-2">
+            <div>
+              <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Annual Consumption</div>
+              <div className="text-xs font-semibold text-slate-200 mt-1">
+                {detailsItem?.annu_con !== null && detailsItem?.annu_con !== undefined && detailsItem?.annu_con !== '' 
+                  ? Number(detailsItem.annu_con).toLocaleString() 
+                  : '-'} {detailsItem?.unit || ''}
+              </div>
+            </div>
+            <div>
+              <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Daily Consumption</div>
+              <div className="text-xs font-semibold text-slate-200 mt-1">
+                {detailsItem?.d_con !== null && detailsItem?.d_con !== undefined && detailsItem?.d_con !== '' 
+                  ? Number(detailsItem.d_con).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 3 }) 
+                  : '-'} {detailsItem?.unit || ''}
+              </div>
+            </div>
+            <div>
+              <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Safety Factor (S.F)</div>
+              <div className="text-xs font-semibold text-slate-200 mt-1">
+                {detailsItem?.sf !== null && detailsItem?.sf !== undefined && detailsItem?.sf !== '' 
+                  ? Number(detailsItem.sf).toLocaleString() 
+                  : '-'}
+              </div>
+            </div>
+            <div>
+              <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Lead Time</div>
+              <div className="text-xs font-semibold text-slate-200 mt-1">
+                {detailsItem?.lead_time !== null && detailsItem?.lead_time !== undefined && detailsItem?.lead_time !== '' 
+                  ? `${Number(detailsItem.lead_time).toLocaleString()} days` 
+                  : '-'}
+              </div>
+            </div>
+            <div>
+              <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Max Stock</div>
+              <div className="text-xs font-semibold text-slate-200 mt-1">
+                {detailsItem?.max_stock !== null && detailsItem?.max_stock !== undefined && detailsItem?.max_stock !== '' 
+                  ? Number(detailsItem.max_stock).toLocaleString() 
+                  : '-'} {detailsItem?.unit || ''}
+              </div>
+            </div>
+            <div>
+              <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Optimum Stock</div>
+              <div className="text-xs font-semibold text-slate-200 mt-1">
+                {detailsItem?.optimum_stock !== null && detailsItem?.optimum_stock !== undefined && detailsItem?.optimum_stock !== '' 
+                  ? Number(detailsItem.optimum_stock).toLocaleString() 
+                  : '-'} {detailsItem?.unit || ''}
+              </div>
+            </div>
+          </div>
+
+          <div className="pt-4 border-t border-slate-800 flex justify-end text-xs">
+            <button
+              onClick={() => {
+                setDetailsModalOpen(false);
+                setDetailsItem(null);
+              }}
+              className="px-4 py-2.5 rounded-lg bg-indigo-600 text-white font-semibold hover:bg-indigo-500 cursor-pointer"
+            >
+              Close
+            </button>
+          </div>
+        </div>
       </Modal>
 
     </div>

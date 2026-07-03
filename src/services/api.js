@@ -1145,10 +1145,35 @@ export const apiService = {
   },
 
   // Inventory
-  getInventory: async (branch, selectedDate = '') => {
+  getInventory: async (branch, selectedDate = '', page = 1, pageSize = 100, searchQuery = '', firmFilter = '') => {
     try {
+      const normalizedBranch = branch?.toLowerCase().trim();
+      let query = supabase
+        .from('inventory_master')
+        .select('*', { count: 'exact' });
+
+      if (firmFilter) {
+        query = query.ilike('firm_name', `%${firmFilter}%`);
+      } else if (normalizedBranch && normalizedBranch !== 'all') {
+        if (normalizedBranch === 'pmmpl' || normalizedBranch === 'madhya') {
+          query = query.in('firm_name', ['Pmmpl', 'Madhya', 'pmmpl', 'madhya']);
+        } else {
+          query = query.ilike('firm_name', `%${normalizedBranch}%`);
+        }
+      }
+
+      if (searchQuery) {
+        query = query.ilike('item_name', `%${searchQuery}%`);
+      }
+
+      const start = (page - 1) * pageSize;
+      const end = start + pageSize - 1;
+      query = query.range(start, end)
+        .order('firm_name', { ascending: true })
+        .order('item_name', { ascending: true });
+
       const [
-        { data, error },
+        { data, count, error },
         {
           actualQuantityMap,
           ratesMap,
@@ -1164,11 +1189,7 @@ export const apiService = {
         },
         salesRawOrdersResult
       ] = await Promise.all([
-        supabase
-          .from('inventory_master')
-          .select('*')
-          .order('firm_name', { ascending: true })
-          .order('item_name', { ascending: true }),
+        query,
         buildLiftDataMaps(selectedDate),
         salesRawSupabase
           .from('orders')
@@ -1202,14 +1223,7 @@ export const apiService = {
         salesRawQtyMap[key] = (salesRawQtyMap[key] || 0) + (Number(order.qty) || 0);
       });
 
-      const normalizedBranch = branch?.toLowerCase().trim();
       const inventoryRows = mergeDuplicateInventoryRows((data || [])
-        .filter(item => {
-          if (!normalizedBranch || normalizedBranch === 'all') return true;
-          const firmName = String(item.firm_name || '').toLowerCase();
-          if (normalizedBranch === 'pmmpl') return firmName.includes('pmmpl') || firmName.includes('madhya');
-          return firmName.includes(normalizedBranch);
-        })
         .map((item, index) => {
           const key = `${normalizeFirmKey(item.firm_name)}::${normalizeItemKey(item.item_name)}`;
           const rate = ratesMap[key] !== undefined ? ratesMap[key] : (item.product_rate ?? '');
@@ -1257,35 +1271,38 @@ export const apiService = {
           };
         }));
 
-      return inventoryRows
-        .sort((a, b) => {
-          const aHasActualLevel = hasActualLevel(a);
-          const bHasActualLevel = hasActualLevel(b);
+      return {
+        data: inventoryRows
+          .sort((a, b) => {
+            const aHasActualLevel = hasActualLevel(a);
+            const bHasActualLevel = hasActualLevel(b);
 
-          if (aHasActualLevel && bHasActualLevel) {
-            const actualLevelDiff = Number(b.actual_level) - Number(a.actual_level);
-            if (actualLevelDiff !== 0) return actualLevelDiff;
-          }
+            if (aHasActualLevel && bHasActualLevel) {
+              const actualLevelDiff = Number(b.actual_level) - Number(a.actual_level);
+              if (actualLevelDiff !== 0) return actualLevelDiff;
+            }
 
-          if (aHasActualLevel !== bHasActualLevel) return aHasActualLevel ? -1 : 1;
-          return a._originalIndex - b._originalIndex;
-        })
-        .map((row, index) => {
-          const item = { ...row };
-          delete item._originalIndex;
-          return {
-            ...item,
-            s_no: index + 1
-          };
-        });
+            if (aHasActualLevel !== bHasActualLevel) return aHasActualLevel ? -1 : 1;
+            return a._originalIndex - b._originalIndex;
+          })
+          .map((row, index) => {
+            const item = { ...row };
+            delete item._originalIndex;
+            return {
+              ...item,
+              s_no: index + 1
+            };
+          }),
+        count: count || 0
+      };
     } catch (e) {
       console.warn(`Supabase getInventory for ${branch} failed:`, e.message);
-      return [];
+      return { data: [], count: 0 };
     }
   },
 
   // Finish Good Inventory — each branch has its own table & schema
-  getFinishGoodInventory: async (branch, selectedDate = '') => {
+  getFinishGoodInventory: async (branch, selectedDate = '', page = 1, pageSize = 100, searchQuery = '', firmFilter = '') => {
     try {
       const b = branch ? branch.toLowerCase().trim() : '';
       const productionMapPromise = buildFinishedGoodProductionMap(selectedDate);
@@ -1298,15 +1315,29 @@ export const apiService = {
       const purchaseReturnMapPromise = buildFinishedGoodPurchaseReturnMap(selectedDate);
       let query = supabase
         .from('finished_goods_inventory_master')
-        .select('*')
+        .select('*', { count: 'exact' });
+
+      if (firmFilter) {
+        query = query.ilike('firm_name', `%${firmFilter}%`);
+      } else if (b && b !== 'all') {
+        if (b === 'pmmpl' || b === 'madhya') {
+          query = query.in('firm_name', ['Pmmpl', 'Madhya', 'pmmpl', 'madhya']);
+        } else {
+          query = query.ilike('firm_name', `%${b}%`);
+        }
+      }
+
+      if (searchQuery) {
+        query = query.ilike('product_name', `%${searchQuery}%`);
+      }
+
+      const start = (page - 1) * pageSize;
+      const end = start + pageSize - 1;
+      query = query.range(start, end)
         .order('firm_name', { ascending: true })
         .order('product_name', { ascending: true });
 
-      if (b && b !== 'all') {
-        query = query.ilike('firm_name', b === 'madhya' ? 'Pmmpl' : branch);
-      }
-
-      const { data, error } = await query;
+      const { data, count, error } = await query;
       if (error) throw error;
 
       const productionMap = await productionMapPromise;
@@ -1317,68 +1348,74 @@ export const apiService = {
       const adjustmentMap = await adjustmentMapPromise;
       const consumptionMap = await consumptionMapPromise;
       const purchaseReturnMap = await purchaseReturnMapPromise;
-      return (data || [])
-        .map((item) => {
-          const key = `${normalizeFirmKey(item.firm_name)}::${normalizeItemKey(item.product_name)}`;
-          
-          let productionQuantity, dispatchQuantity, purchaseQuantity, returnQuantity, adjustmentQuantity, consumptionQuantity, purchaseReturnQuantity;
-          let adjustmentQuantityForCurrentLevel;
+      return {
+        data: (data || [])
+          .map((item) => {
+            const key = `${normalizeFirmKey(item.firm_name)}::${normalizeItemKey(item.product_name)}`;
+            
+            let productionQuantity, dispatchQuantity, purchaseQuantity, returnQuantity, adjustmentQuantity, consumptionQuantity, purchaseReturnQuantity;
+            let adjustmentQuantityForCurrentLevel;
 
-          if (selectedDate) {
-            productionQuantity = productionMap[key]?.after || 0;
-            dispatchQuantity = dispatchMap[key]?.after || 0;
-            purchaseQuantity = purchaseMap[key]?.after || 0;
-            returnQuantity = returnMap[key]?.after || 0;
-            adjustmentQuantity = adjustmentMap[key]?.total || 0;
-            adjustmentQuantityForCurrentLevel = adjustmentMap[key]?.after || 0;
-            consumptionQuantity = consumptionMap[key]?.after || 0;
-            purchaseReturnQuantity = purchaseReturnMap[key]?.after || 0;
-          } else {
-            productionQuantity = productionMap[key]?.total || 0;
-            dispatchQuantity = dispatchMap[key]?.total || 0;
-            purchaseQuantity = purchaseMap[key]?.total || 0;
-            returnQuantity = returnMap[key]?.total || 0;
-            adjustmentQuantity = adjustmentMap[key]?.total || 0;
-            adjustmentQuantityForCurrentLevel = adjustmentMap[key]?.total || 0;
-            consumptionQuantity = consumptionMap[key]?.total || 0;
-            purchaseReturnQuantity = purchaseReturnMap[key]?.total || 0;
-          }
+            if (selectedDate) {
+              productionQuantity = productionMap[key]?.after || 0;
+              dispatchQuantity = dispatchMap[key]?.after || 0;
+              purchaseQuantity = purchaseMap[key]?.after || 0;
+              returnQuantity = returnMap[key]?.after || 0;
+              adjustmentQuantity = adjustmentMap[key]?.total || 0;
+              adjustmentQuantityForCurrentLevel = adjustmentMap[key]?.total || 0;
+              consumptionQuantity = consumptionMap[key]?.after || 0;
+              purchaseReturnQuantity = purchaseReturnMap[key]?.after || 0;
+            } else {
+              productionQuantity = productionMap[key]?.total || 0;
+              dispatchQuantity = dispatchMap[key]?.total || 0;
+              purchaseQuantity = purchaseMap[key]?.total || 0;
+              returnQuantity = returnMap[key]?.total || 0;
+              adjustmentQuantity = adjustmentMap[key]?.total || 0;
+              adjustmentQuantityForCurrentLevel = adjustmentMap[key]?.total || 0;
+              consumptionQuantity = consumptionMap[key]?.total || 0;
+              purchaseReturnQuantity = purchaseReturnMap[key]?.total || 0;
+            }
 
-          const pendingOrderQuantity = pendingOrderMap[key];
-          const hasCurrentLevelSync = productionQuantity !== undefined || dispatchQuantity !== undefined || purchaseQuantity !== undefined || returnQuantity !== undefined || adjustmentQuantity !== undefined || consumptionQuantity !== undefined || purchaseReturnQuantity !== undefined;
-          const opStock = numberOrZero(item.op_stock);
+            const pendingOrderQuantity = pendingOrderMap[key];
+            const hasCurrentLevelSync = productionQuantity !== undefined || dispatchQuantity !== undefined || purchaseQuantity !== undefined || returnQuantity !== undefined || adjustmentQuantity !== undefined || consumptionQuantity !== undefined || purchaseReturnQuantity !== undefined;
+            const opStock = numberOrZero(item.op_stock);
 
-          return {
-            ...item,
-            op_stock: opStock,
-            stock_adjustment: adjustmentQuantity !== undefined ? adjustmentQuantity : item.stock_adjustment,
-            sales_order_pending: pendingOrderQuantity !== undefined ? pendingOrderQuantity : item.sales_order_pending,
-            purchase_material_received: purchaseQuantity !== undefined ? purchaseQuantity : item.purchase_material_received,
-            production: productionQuantity !== undefined ? productionQuantity : item.production,
-            sales: dispatchQuantity !== undefined ? dispatchQuantity : item.sales,
-            sales_return: returnQuantity !== undefined ? returnQuantity : item.sales_return,
-            consumption: consumptionQuantity !== undefined ? consumptionQuantity : item.consumption,
-            purchase_return: purchaseReturnQuantity !== undefined ? purchaseReturnQuantity : item.purchase_return,
-            current_level: hasCurrentLevelSync
-              ? opStock + purchaseQuantity + productionQuantity + adjustmentQuantityForCurrentLevel - dispatchQuantity + returnQuantity - consumptionQuantity - purchaseReturnQuantity
-              : item.current_level,
-            _hasCurrentLevelSync: hasCurrentLevelSync
-          };
-        })
-        .sort((a, b) => {
-          if (a._hasCurrentLevelSync !== b._hasCurrentLevelSync) {
-            return a._hasCurrentLevelSync ? -1 : 1;
-          }
-          return 0;
-        })
-        .map((item) => {
-          const cleanedItem = { ...item };
-          delete cleanedItem._hasCurrentLevelSync;
-          return cleanedItem;
-        });
+            return {
+              ...item,
+              op_stock: opStock,
+              stock_adjustment: adjustmentQuantity !== undefined ? adjustmentQuantity : item.stock_adjustment,
+              sales_order_pending: pendingOrderQuantity !== undefined ? pendingOrderQuantity : item.sales_order_pending,
+              purchase_material_received: purchaseQuantity !== undefined ? purchaseQuantity : item.purchase_material_received,
+              production: productionQuantity !== undefined ? productionQuantity : item.production,
+              sales: dispatchQuantity !== undefined ? dispatchQuantity : item.sales,
+              sales_return: returnQuantity !== undefined ? returnQuantity : item.sales_return,
+              consumption: consumptionQuantity !== undefined ? consumptionQuantity : item.consumption,
+              purchase_return: purchaseReturnQuantity !== undefined ? purchaseReturnQuantity : item.purchase_return,
+              current_level: hasCurrentLevelSync
+                ? opStock + purchaseQuantity + productionQuantity + adjustmentQuantityForCurrentLevel - dispatchQuantity + returnQuantity - consumptionQuantity - purchaseReturnQuantity
+                : item.current_level,
+              _hasCurrentLevelSync: hasCurrentLevelSync
+            };
+          })
+          .sort((a, b) => {
+            if (a._hasCurrentLevelSync !== b._hasCurrentLevelSync) {
+              return a._hasCurrentLevelSync ? -1 : 1;
+            }
+            return 0;
+          })
+          .map((item, index) => {
+            const cleanedItem = { ...item };
+            delete cleanedItem._hasCurrentLevelSync;
+            return {
+              ...cleanedItem,
+              s_no: index + 1
+            };
+          }),
+        count: count || 0
+      };
     } catch (e) {
       console.warn(`Supabase getFinishGoodInventory for ${branch} failed:`, e.message);
-      return [];
+      return { data: [], count: 0 };
     }
   },
 

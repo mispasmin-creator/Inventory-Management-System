@@ -49,6 +49,21 @@ const StockAdjustment = () => {
   const [editingAdjustment, setEditingAdjustment] = useState(null);
   const [opStockMaterialType, setOpStockMaterialType] = useState('finish_good');
 
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(100);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
+  const [firmFilter, setFirmFilter] = useState('');
+  const [totalCount, setTotalCount] = useState(0);
+
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedSearchQuery(searchQuery);
+      setCurrentPage(1);
+    }, 500);
+    return () => clearTimeout(handler);
+  }, [searchQuery]);
+
   const accessibleFirms = useMemo(() => {
     if (user?.role === 'Admin') return branchOptions;
     const assignedFirms = user?.branch === 'All'
@@ -113,10 +128,14 @@ const StockAdjustment = () => {
 
   useEffect(() => {
     if (!user) return;
-    fetchStockAdjustments();
     fetchRawMaterialItems();
     fetchFinishGoodItems();
   }, [user]);
+
+  useEffect(() => {
+    if (!user) return;
+    fetchStockAdjustments();
+  }, [user, currentPage, pageSize, debouncedSearchQuery, firmFilter, accessibleFirms]);
 
   const restrictQueryToAccessibleFirms = (query) => {
     const databaseFirms = accessibleFirms.flatMap(firmName =>
@@ -128,17 +147,33 @@ const StockAdjustment = () => {
   const fetchStockAdjustments = async () => {
     setLoading(true);
     try {
-      const query = supabase
+      let query = supabase
         .from('stock_adjustment')
-        .select('id, entry_date, firm_name, item_name, qty, remark, status, material_type, created_at')
+        .select('id, entry_date, firm_name, item_name, qty, remark, status, material_type, created_at', { count: 'exact' })
         .order('created_at', { ascending: false });
-      const { data, error } = await restrictQueryToAccessibleFirms(query);
+        
+      query = restrictQueryToAccessibleFirms(query);
+
+      if (firmFilter) {
+        query = query.ilike('firm_name', `%${firmFilter}%`);
+      }
+
+      if (debouncedSearchQuery) {
+        query = query.ilike('item_name', `%${debouncedSearchQuery}%`);
+      }
+
+      const start = (currentPage - 1) * pageSize;
+      const end = start + pageSize - 1;
+      query = query.range(start, end);
+
+      const { data, count, error } = await query;
 
       if (error) throw error;
       setRawEntries((data || []).map(row => ({
         ...row,
         firm_name: normalizeFirmName(row.firm_name)
       })));
+      setTotalCount(count || 0);
     } catch (e) {
       showError(e.message || 'Failed to load stock adjustment entries.');
     } finally {
@@ -986,10 +1021,9 @@ const StockAdjustment = () => {
               ? 'Manual OP. Stock Entries'
               : 'Raw Material & Finished Good Products'}
         </h3>
-        {loading ? (
-          <TableSkeleton rows={8} cols={8} />
-        ) : activeTab === 'op_stock' ? (
+        {activeTab === 'op_stock' ? (
           <Table
+            isLoading={loading}
             columns={opStockColumns}
             data={savedOpStockRows}
             searchPlaceholder="Search OP. Stock entries..."
@@ -1000,6 +1034,7 @@ const StockAdjustment = () => {
           />
         ) : activeTab === 'products' ? (
           <Table
+            isLoading={loading}
             columns={productColumns}
             data={productRows}
             searchPlaceholder="Search products..."
@@ -1010,13 +1045,31 @@ const StockAdjustment = () => {
           />
         ) : (
           <Table
+            isLoading={loading}
             columns={rawColumns}
             data={rawEntries}
             searchPlaceholder="Search stock adjustment entries..."
-            filterKey="material_type"
-            filterOptions={['raw_material', 'finish_good']}
-            filterPlaceholder="Filter Type"
+            filterKey="firm_name"
+            filterOptions={accessibleFirms}
+            filterPlaceholder="Filter Firm"
             exportFileName="stock_adjustment_entries"
+            serverSide={true}
+            serverTotalItems={totalCount}
+            serverCurrentPage={currentPage}
+            serverPageSize={pageSize}
+            onServerPageChange={setCurrentPage}
+            onServerPageSizeChange={(size) => {
+              setPageSize(size);
+              setCurrentPage(1);
+            }}
+            onServerSearchChange={(val) => {
+              setSearchQuery(val);
+              setCurrentPage(1);
+            }}
+            onServerFilterChange={(val) => {
+              setFirmFilter(val === 'All' ? '' : val);
+              setCurrentPage(1);
+            }}
           />
         )}
       </GlassCard>

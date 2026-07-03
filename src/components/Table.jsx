@@ -10,23 +10,45 @@ const Table = ({
   filterPlaceholder = "All Categories",
   exportFileName = "report",
   actions = null,
-  disableSorting = false
+  disableSorting = false,
+  serverSide = false,
+  serverTotalItems = 0,
+  serverCurrentPage = 1,
+  serverPageSize = 100,
+  onServerSearchChange,
+  onServerFilterChange,
+  onServerPageChange,
+  onServerPageSizeChange,
+  isLoading = false
 }) => {
-  const [searchQuery, setSearchQuery] = useState('');
-  const [filterValue, setFilterValue] = useState('');
+  const [localSearchQuery, setLocalSearchQuery] = useState('');
+  const [localFilterValue, setLocalFilterValue] = useState('');
   const [sortConfig, setSortConfig] = useState({ key: null, direction: 'asc' });
-  const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize, setPageSize] = useState(500);
+  const [localCurrentPage, setLocalCurrentPage] = useState(1);
+  const [localPageSize, setLocalPageSize] = useState(100);
+
+  const searchQuery = localSearchQuery;
+  const filterValue = localFilterValue;
+  const currentPage = serverSide ? serverCurrentPage : localCurrentPage;
+  const pageSize = serverSide ? serverPageSize : localPageSize;
 
   // Reset pagination on search or filter change
   const handleSearchChange = (e) => {
-    setSearchQuery(e.target.value);
-    setCurrentPage(1);
+    setLocalSearchQuery(e.target.value);
+    if (serverSide) {
+      if (onServerSearchChange) onServerSearchChange(e.target.value);
+    } else {
+      setLocalCurrentPage(1);
+    }
   };
 
   const handleFilterChange = (e) => {
-    setFilterValue(e.target.value);
-    setCurrentPage(1);
+    setLocalFilterValue(e.target.value);
+    if (serverSide) {
+      if (onServerFilterChange) onServerFilterChange(e.target.value);
+    } else {
+      setLocalCurrentPage(1);
+    }
   };
 
   // Sort helper
@@ -42,23 +64,25 @@ const Table = ({
   const processedData = useMemo(() => {
     let result = [...data];
 
-    // 1. Apply category filter
-    if (filterKey && filterValue) {
-      result = result.filter(row => {
-        const val = row[filterKey];
-        return val && String(val).toLowerCase() === filterValue.toLowerCase();
-      });
-    }
-
-    // 2. Apply global search filter
-    if (searchQuery) {
-      const query = searchQuery.toLowerCase();
-      result = result.filter(row => {
-        return Object.values(row).some(cell => {
-          if (cell === null || cell === undefined) return false;
-          return String(cell).toLowerCase().includes(query);
+    if (!serverSide) {
+      // 1. Apply category filter
+      if (filterKey && filterValue) {
+        result = result.filter(row => {
+          const val = row[filterKey];
+          return val && String(val).toLowerCase() === filterValue.toLowerCase();
         });
-      });
+      }
+
+      // 2. Apply global search filter
+      if (searchQuery) {
+        const query = searchQuery.toLowerCase();
+        result = result.filter(row => {
+          return Object.values(row).some(cell => {
+            if (cell === null || cell === undefined) return false;
+            return String(cell).toLowerCase().includes(query);
+          });
+        });
+      }
     }
 
     // 3. Apply sorting
@@ -83,16 +107,17 @@ const Table = ({
     }
 
     return result;
-  }, [data, searchQuery, filterValue, filterKey, sortConfig]);
+  }, [data, searchQuery, filterValue, filterKey, sortConfig, serverSide]);
 
   // Pagination calculation
-  const totalItems = processedData.length;
-  const totalPages = Math.ceil(totalItems / pageSize);
+  const totalItems = serverSide ? serverTotalItems : processedData.length;
+  const totalPages = Math.ceil(totalItems / pageSize) || 1;
   
   const paginatedData = useMemo(() => {
+    if (serverSide) return processedData;
     const start = (currentPage - 1) * pageSize;
     return processedData.slice(start, start + pageSize);
-  }, [processedData, currentPage, pageSize]);
+  }, [processedData, currentPage, pageSize, serverSide]);
 
   // Export to CSV helper
   const exportToCSV = () => {
@@ -214,8 +239,15 @@ const Table = ({
               })}
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-800/60">
-            {paginatedData.length === 0 ? (
+          <tbody className="divide-y divide-slate-800/60 relative">
+            {isLoading && (
+              <tr className="absolute inset-0 z-20 bg-slate-900/30 backdrop-blur-[1px] flex items-center justify-center">
+                <td>
+                  <div className="w-6 h-6 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin shadow-lg"></div>
+                </td>
+              </tr>
+            )}
+            {paginatedData.length === 0 && !isLoading ? (
               <tr>
                 <td colSpan={columns.length} className="text-center py-10 text-slate-500">
                   No records matching the selection.
@@ -245,7 +277,7 @@ const Table = ({
       </div>
 
       {/* Pagination Footer */}
-      {totalPages > 1 && (
+      {totalItems > 0 && (
         <div className="flex items-center justify-between px-2 pt-2 text-xs">
           <div className="text-slate-500">
             Showing <span className="font-semibold text-slate-300">{(currentPage - 1) * pageSize + 1}</span> to{' '}
@@ -262,8 +294,13 @@ const Table = ({
               <select
                 value={pageSize}
                 onChange={(e) => {
-                  setPageSize(Number(e.target.value));
-                  setCurrentPage(1);
+                  const newSize = Number(e.target.value);
+                  if (serverSide) {
+                    if (onServerPageSizeChange) onServerPageSizeChange(newSize);
+                  } else {
+                    setLocalPageSize(newSize);
+                    setLocalCurrentPage(1);
+                  }
                 }}
                 className="px-2 py-1 rounded bg-slate-900 border border-slate-800 text-slate-300 text-[11px]"
               >
@@ -276,7 +313,14 @@ const Table = ({
             {/* Pagination Actions */}
             <div className="flex items-center gap-1">
               <button
-                onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                onClick={() => {
+                  const newPage = Math.max(currentPage - 1, 1);
+                  if (serverSide) {
+                    if (onServerPageChange) onServerPageChange(newPage);
+                  } else {
+                    setLocalCurrentPage(newPage);
+                  }
+                }}
                 disabled={currentPage === 1}
                 className="p-1 rounded bg-slate-900 border border-slate-800 text-slate-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed hover:bg-slate-800 cursor-pointer"
               >
@@ -286,7 +330,14 @@ const Table = ({
                 {currentPage} / {totalPages}
               </span>
               <button
-                onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                onClick={() => {
+                  const newPage = Math.min(currentPage + 1, totalPages);
+                  if (serverSide) {
+                    if (onServerPageChange) onServerPageChange(newPage);
+                  } else {
+                    setLocalCurrentPage(newPage);
+                  }
+                }}
                 disabled={currentPage === totalPages}
                 className="p-1 rounded bg-slate-900 border border-slate-800 text-slate-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed hover:bg-slate-800 cursor-pointer"
               >
