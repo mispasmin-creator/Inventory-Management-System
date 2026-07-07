@@ -238,19 +238,21 @@ const buildSemiFinishedActualLevelMap = async (selectedDate = '') => {
   const semiAdjustmentMap = {};
   const semiGrainsMap = {};
   const semiFinesMap = {};
+  const semiRawConsumptionMap = {};
 
   try {
     for (let from = 0; ; from += pageSize) {
       const { data, error } = await productionSupabase
         .from('semi_production')
-        .select('id, "SF-Sr No.", "Firm name"')
+        .select('id, "SF-Sr No.", "Name Of Semi Finished Good", "Firm name"')
         .range(from, from + pageSize - 1);
 
       if (error) throw error;
 
       (data || []).forEach((row) => {
         if (row['SF-Sr No.']) {
-          productionFirmMap.set(row['SF-Sr No.'], row['Firm name']);
+          const productionKey = `${row['SF-Sr No.']}::${normalizeItemKey(row['Name Of Semi Finished Good'])}`;
+          productionFirmMap.set(productionKey, row['Firm name']);
         }
       });
 
@@ -266,7 +268,7 @@ const buildSemiFinishedActualLevelMap = async (selectedDate = '') => {
       if (error) throw error;
 
       (data || []).forEach((row) => {
-        const rowDate = getLocalDateString(row.Timestamp || row.created_at || row.date);
+        const rowDate = getLocalDateString(row['Date Of Production'] || row.Timestamp || row.created_at || row.date);
         if (selectedDate && (!rowDate || rowDate < selectedDate)) return;
 
         const serialNumber = row['S No.'];
@@ -274,11 +276,26 @@ const buildSemiFinishedActualLevelMap = async (selectedDate = '') => {
 
         const productName = row['Product Name'];
         const productKey = normalizeItemKey(productName);
-        const firmKey = normalizeFirmKey(normalizeProductionFirmName(productionFirmMap.get(row['Semi Finished Production No.'])));
+        const productionKey = `${row['Semi Finished Production No.']}::${productKey}`;
+        const firmKey = normalizeFirmKey(normalizeProductionFirmName(productionFirmMap.get(productionKey)));
         const rawQuantity = row['Qty Of Semi Finished Good'];
         const quantity = Number(rawQuantity);
-        if (!firmKey || !productKey || rawQuantity === null || rawQuantity === '' || !Number.isFinite(quantity)) return;
+        if (!firmKey || rawQuantity === null || rawQuantity === '' || !Number.isFinite(quantity)) return;
 
+        // Process raw materials consumed — runs for ALL valid rows regardless of product type
+        for (let i = 1; i <= 5; i++) {
+          const rmName = row[`Raw Material Name ${i}`];
+          const rmKey = normalizeItemKey(rmName);
+          const rmQtyRaw = row[`Quantity Of Raw Material ${i}`];
+          const rmQty = Number(rmQtyRaw);
+          if (rmKey && rmQtyRaw !== null && rmQtyRaw !== '' && Number.isFinite(rmQty) && rmQty > 0) {
+            const rmMapKey = `${firmKey}::${rmKey}`;
+            semiRawConsumptionMap[rmMapKey] = (semiRawConsumptionMap[rmMapKey] || 0) + rmQty;
+          }
+        }
+
+        // Semi finished output adjustment (only for fines/grains products)
+        if (!productKey) return;
         const productText = String(productName || '').toLowerCase();
         const signedQuantity = productText.includes('grains')
           ? -quantity
@@ -302,7 +319,7 @@ const buildSemiFinishedActualLevelMap = async (selectedDate = '') => {
     console.warn('Supabase semi finished actual sync failed:', error.message);
   }
 
-  return { semiAdjustmentMap, semiGrainsMap, semiFinesMap };
+  return { semiAdjustmentMap, semiGrainsMap, semiFinesMap, semiRawConsumptionMap };
 };
 
 const buildCrushingActualLevelMap = async (selectedDate = '') => {
@@ -940,7 +957,7 @@ const buildLiftDataMaps = async (selectedDate = '') => {
 
     const [
       { usageMap: productionUsageMap, annualUsageMap: annualProductionUsageMap },
-      { semiAdjustmentMap, semiGrainsMap, semiFinesMap },
+      { semiAdjustmentMap, semiGrainsMap, semiFinesMap, semiRawConsumptionMap },
       { crushingAdjustmentMap, crushingGrainsMap, crushingFinesMap, crushingLumpsMap, crushingOutputsMap }
     ] = await Promise.all([
       buildProductionUsageMap(selectedDate),
@@ -948,6 +965,9 @@ const buildLiftDataMaps = async (selectedDate = '') => {
       buildCrushingActualLevelMap(selectedDate)
     ]);
     Object.entries(productionUsageMap).forEach(([key, quantity]) => {
+      actualQuantityMap[key] = (actualQuantityMap[key] || 0) - quantity;
+    });
+    Object.entries(semiRawConsumptionMap).forEach(([key, quantity]) => {
       actualQuantityMap[key] = (actualQuantityMap[key] || 0) - quantity;
     });
     Object.entries(semiAdjustmentMap).forEach(([key, quantity]) => {
@@ -1000,6 +1020,7 @@ const buildLiftDataMaps = async (selectedDate = '') => {
       productionUsageMap,
       semiGrainsMap,
       semiFinesMap,
+      semiRawConsumptionMap,
       crushingGrainsMap,
       crushingFinesMap,
       crushingLumpsMap,
@@ -1015,6 +1036,7 @@ const buildLiftDataMaps = async (selectedDate = '') => {
       productionUsageMap: {},
       semiGrainsMap: {},
       semiFinesMap: {},
+      semiRawConsumptionMap: {},
       crushingGrainsMap: {},
       crushingFinesMap: {},
       crushingLumpsMap: {},
@@ -1182,6 +1204,7 @@ export const apiService = {
           productionUsageMap,
           semiGrainsMap,
           semiFinesMap,
+          semiRawConsumptionMap,
           crushingGrainsMap,
           crushingFinesMap,
           crushingLumpsMap,
@@ -1254,8 +1277,8 @@ export const apiService = {
             optimum_stock: optimumStock,
             op_stock: opStock,
             purchase_system: purchaseQuantityMap[key] || 0,
-            production_consumption: -(productionUsageMap[key] || 0) + (semiGrainsMap[key] || 0) + (semiFinesMap[key] || 0) + (crushingGrainsMap[key] || 0) + (crushingLumpsMap[key] || 0) + (crushingOutputsMap[key] || 0),
-            semi_grains: semiGrainsMap[key] || 0,
+            production_consumption: -(productionUsageMap[key] || 0) + (semiGrainsMap[key] || 0) - (semiRawConsumptionMap[key] || 0) + (semiFinesMap[key] || 0) + (crushingGrainsMap[key] || 0) + (crushingLumpsMap[key] || 0) + (crushingOutputsMap[key] || 0),
+            semi_grains: (semiGrainsMap[key] || 0) - (semiRawConsumptionMap[key] || 0),
             semi_fines: semiFinesMap[key] || 0,
             crushing_grains: crushingGrainsMap[key] || 0,
             crushing_fines: crushingFinesMap[key] || 0,

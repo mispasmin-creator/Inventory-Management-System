@@ -79,6 +79,8 @@ const BranchInventory = () => {
   const [selectedItem, setSelectedItem] = useState(null);
   const [detailsModalOpen, setDetailsModalOpen] = useState(false);
   const [detailsItem, setDetailsItem] = useState(null);
+  const [prodBreakdownModalOpen, setProdBreakdownModalOpen] = useState(false);
+  const [prodBreakdownItem, setProdBreakdownItem] = useState(null);
   
   // Transfers logs
   const [transferRequests, setTransferRequests] = useState([]);
@@ -161,6 +163,23 @@ const BranchInventory = () => {
     );
     fetchTransfers();
   }, [activeBranch, type, canReadActiveBranch, selectedDate, currentPage, pageSize, debouncedSearchQuery, firmFilter]);
+
+  // Dedicated, unpaginated fetch used only to compute accurate grand totals
+  // (the table fetch above is capped at `pageSize` rows, so with "All" firms
+  // selected it can miss items belonging to firms other than the first one
+  // returned, leaving their totals at 0).
+  const [totalsItems, setTotalsItems] = useState([]);
+  useEffect(() => {
+    if (!activeBranch || !canReadActiveBranch) return;
+    let cancelled = false;
+    (async () => {
+      const response = type === 'finish_good'
+        ? await apiService.getFinishGoodInventory(activeBranch, selectedDate, 1, 100000, '', firmFilter)
+        : await apiService.getInventory(activeBranch, INVENTORY_START_DATE, 1, 100000, '', firmFilter);
+      if (!cancelled) setTotalsItems(response.data || []);
+    })();
+    return () => { cancelled = true; };
+  }, [activeBranch, type, canReadActiveBranch, selectedDate, firmFilter]);
 
 
 
@@ -470,7 +489,18 @@ const BranchInventory = () => {
         const val = Number(row.production_consumption || 0);
         return getTintedCellClass(row.production_consumption, val >= 0 ? 'emerald' : 'rose');
       },
-      render: (row) => renderRawNumber(row.production_consumption)
+      render: (row) => (
+        <button
+          onClick={() => {
+            setProdBreakdownItem(row);
+            setProdBreakdownModalOpen(true);
+          }}
+          className="w-full text-center font-semibold cursor-pointer hover:opacity-80 transition-opacity underline-offset-2 hover:underline"
+          title="Click to see breakdown"
+        >
+          {renderRawNumber(row.production_consumption)}
+        </button>
+      )
     },
     { 
       header: 'Raw Material Sales', 
@@ -652,18 +682,27 @@ const BranchInventory = () => {
       optimumGrandTotal: 0,
       stockGrandTotal: 0,
       byBranch: {
-        Madhya: { optimum: 0, stock: 0 },
+        Pmmpl: { optimum: 0, stock: 0 },
         Purab: { optimum: 0, stock: 0 },
         Rkl: { optimum: 0, stock: 0 }
       }
     };
 
-    displayedInventoryItems.forEach(item => {
+    const totalsSource = (totalsItems || []).filter(item => {
+      const firmName = item.firm_name || '';
+      const normFirm = firmName.toLowerCase().trim() === 'madhya' ? 'pmmpl' : firmName.toLowerCase().trim();
+      return accessibleBranchOptions.some(b => {
+        const normB = b.toLowerCase().trim() === 'madhya' ? 'pmmpl' : b.toLowerCase().trim();
+        return normFirm === normB;
+      });
+    });
+
+    totalsSource.forEach(item => {
       const firmName = item.firm_name || '';
       const normFirm = firmName.toLowerCase().trim();
       let branchKey = 'Purab';
       if (normFirm.includes('pmmpl') || normFirm.includes('madhya')) {
-        branchKey = 'Madhya';
+        branchKey = 'Pmmpl';
       } else if (normFirm.includes('rkl')) {
         branchKey = 'Rkl';
       } else if (normFirm.includes('purab')) {
@@ -682,7 +721,7 @@ const BranchInventory = () => {
     });
 
     return res;
-  }, [displayedInventoryItems]);
+  }, [totalsItems, accessibleBranchOptions]);
 
   // Pick correct column set
   const inventoryColumns = isFinishGood ? finishGoodColumns : rawMaterialColumns;
@@ -832,7 +871,7 @@ const BranchInventory = () => {
               </h3>
             </div>
             <div className="mt-3 flex flex-col items-center justify-center text-[10px] text-slate-500 space-y-0.5">
-              <div>Madhya: <span className="font-medium text-slate-400">₹{totals.byBranch.Madhya.optimum.toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 3 })}</span></div>
+              <div>Pmmpl: <span className="font-medium text-slate-400">₹{totals.byBranch.Pmmpl.optimum.toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 3 })}</span></div>
               <div>Purab: <span className="font-medium text-slate-400">₹{totals.byBranch.Purab.optimum.toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 3 })}</span></div>
               <div>Rkl: <span className="font-medium text-slate-400">₹{totals.byBranch.Rkl.optimum.toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 3 })}</span></div>
             </div>
@@ -846,7 +885,7 @@ const BranchInventory = () => {
               </h3>
             </div>
             <div className="mt-3 flex flex-col items-center justify-center text-[10px] text-slate-500 space-y-0.5">
-              <div>Madhya: <span className="font-medium text-slate-400">₹{totals.byBranch.Madhya.stock.toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 3 })}</span></div>
+              <div>Pmmpl: <span className="font-medium text-slate-400">₹{totals.byBranch.Pmmpl.stock.toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 3 })}</span></div>
               <div>Purab: <span className="font-medium text-slate-400">₹{totals.byBranch.Purab.stock.toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 3 })}</span></div>
               <div>Rkl: <span className="font-medium text-slate-400">₹{totals.byBranch.Rkl.stock.toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 3 })}</span></div>
             </div>
@@ -1406,8 +1445,178 @@ const BranchInventory = () => {
         </div>
       </Modal>
 
+      <Modal
+        isOpen={prodBreakdownModalOpen}
+        onClose={() => {
+          setProdBreakdownModalOpen(false);
+          setProdBreakdownItem(null);
+        }}
+        title={`Production Consumption: ${prodBreakdownItem?.item_name || ''}`}
+      >
+        <div className="space-y-4 text-slate-300">
+
+          {/* Header: Item + Firm + Net — same card style as the page */}
+          <div className="flex items-center justify-between gap-4 px-4 py-3 rounded-xl bg-slate-900/60 border border-slate-800 backdrop-blur-md">
+            <div>
+              <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Item</div>
+              <div className="text-sm font-bold text-slate-100 mt-0.5">{prodBreakdownItem?.item_name || '-'}</div>
+            </div>
+            <div>
+              <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Firm</div>
+              <div className="text-sm font-bold text-slate-100 mt-0.5">{prodBreakdownItem?.firm_name || '-'}</div>
+            </div>
+            <div className="text-right">
+              <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Net Total</div>
+              <div className={`text-base font-black mt-0.5 ${Number(prodBreakdownItem?.production_consumption || 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                {prodBreakdownItem?.production_consumption !== null && prodBreakdownItem?.production_consumption !== undefined && prodBreakdownItem?.production_consumption !== ''
+                  ? Number(prodBreakdownItem.production_consumption).toLocaleString(undefined, { maximumFractionDigits: 3 })
+                  : '-'}
+              </div>
+            </div>
+          </div>
+
+          {/* Column-wise table — styled like Table.jsx with green theme */}
+          <div className="overflow-x-auto rounded-xl border border-slate-800 bg-slate-900/30 backdrop-blur-md">
+            <table className="w-full border-collapse text-left text-xs text-slate-300 min-w-[480px]">
+              <thead className="bg-slate-900 uppercase tracking-wider text-slate-400 border-b border-slate-800 sticky top-0 z-10">
+                <tr>
+                  <th className="px-4 py-2.5 font-semibold text-slate-400 w-[38%]">Category</th>
+                  <th className="px-4 py-2.5 font-semibold text-emerald-400 text-right">
+                    Production
+                  </th>
+                  <th className="px-4 py-2.5 font-semibold text-emerald-400 text-right">
+                    Semi Finished
+                  </th>
+                  <th className="px-4 py-2.5 font-semibold text-emerald-400 text-right">
+                    Crushing
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-800/60">
+
+                {/* Row 1: Raw Material Consumed */}
+                {(() => {
+                  const prodVal = (() => {
+                    const net = Number(prodBreakdownItem?.production_consumption || 0);
+                    const semiAdj = Number(prodBreakdownItem?.semi_fines || 0) + Number(prodBreakdownItem?.semi_grains || 0);
+                    const crushAdj = Number(prodBreakdownItem?.crushing_grains || 0) + Number(prodBreakdownItem?.crushing_fines || 0) + Number(prodBreakdownItem?.crushing_lumps || 0) + Number(prodBreakdownItem?.crushing_outputs || 0);
+                    return net - semiAdj - crushAdj;
+                  })();
+                  return (
+                    <tr className="hover:bg-slate-800/10 transition-colors duration-150">
+                      <td className="px-4 py-2 text-slate-400 font-medium whitespace-nowrap">Raw Material Consumed (−)</td>
+                      <td className={`px-4 py-2 text-right font-semibold whitespace-nowrap ${prodVal < 0 ? 'text-rose-400' : prodVal > 0 ? 'text-emerald-400' : 'text-slate-600'}`}>
+                        {prodVal !== 0 ? prodVal.toLocaleString(undefined, { maximumFractionDigits: 3 }) : '—'}
+                      </td>
+                      <td className="px-4 py-2 text-right text-slate-600 whitespace-nowrap">—</td>
+                      <td className="px-4 py-2 text-right text-slate-600 whitespace-nowrap">—</td>
+                    </tr>
+                  );
+                })()}
+
+                {/* Row 2: Fines Output */}
+                <tr className="hover:bg-slate-800/10 transition-colors duration-150">
+                  <td className="px-4 py-2 text-slate-400 font-medium whitespace-nowrap">Fines Output (+)</td>
+                  <td className="px-4 py-2 text-right text-slate-600 whitespace-nowrap">—</td>
+                  <td className={`px-4 py-2 text-right font-semibold whitespace-nowrap ${Number(prodBreakdownItem?.semi_fines || 0) > 0 ? 'text-emerald-400' : Number(prodBreakdownItem?.semi_fines || 0) < 0 ? 'text-rose-400' : 'text-slate-600'}`}>
+                    {Number(prodBreakdownItem?.semi_fines || 0) !== 0
+                      ? Number(prodBreakdownItem.semi_fines).toLocaleString(undefined, { maximumFractionDigits: 3 })
+                      : '—'}
+                  </td>
+                  <td className={`px-4 py-2 text-right font-semibold whitespace-nowrap ${Number(prodBreakdownItem?.crushing_fines || 0) > 0 ? 'text-emerald-400' : Number(prodBreakdownItem?.crushing_fines || 0) < 0 ? 'text-rose-400' : 'text-slate-600'}`}>
+                    {Number(prodBreakdownItem?.crushing_fines || 0) !== 0
+                      ? Number(prodBreakdownItem.crushing_fines).toLocaleString(undefined, { maximumFractionDigits: 3 })
+                      : '—'}
+                  </td>
+                </tr>
+
+                {/* Row 3: Grains Output */}
+                <tr className="hover:bg-slate-800/10 transition-colors duration-150">
+                  <td className="px-4 py-2 text-slate-400 font-medium whitespace-nowrap">Grains Output</td>
+                  <td className="px-4 py-2 text-right text-slate-600 whitespace-nowrap">—</td>
+                  <td className={`px-4 py-2 text-right font-semibold whitespace-nowrap ${Number(prodBreakdownItem?.semi_grains || 0) > 0 ? 'text-emerald-400' : Number(prodBreakdownItem?.semi_grains || 0) < 0 ? 'text-rose-400' : 'text-slate-600'}`}>
+                    {Number(prodBreakdownItem?.semi_grains || 0) !== 0
+                      ? Number(prodBreakdownItem.semi_grains).toLocaleString(undefined, { maximumFractionDigits: 3 })
+                      : '—'}
+                  </td>
+                  <td className={`px-4 py-2 text-right font-semibold whitespace-nowrap ${Number(prodBreakdownItem?.crushing_grains || 0) > 0 ? 'text-emerald-400' : Number(prodBreakdownItem?.crushing_grains || 0) < 0 ? 'text-rose-400' : 'text-slate-600'}`}>
+                    {Number(prodBreakdownItem?.crushing_grains || 0) !== 0
+                      ? Number(prodBreakdownItem.crushing_grains).toLocaleString(undefined, { maximumFractionDigits: 3 })
+                      : '—'}
+                  </td>
+                </tr>
+
+                {/* Row 4: Lumps / Fired */}
+                <tr className="hover:bg-slate-800/10 transition-colors duration-150">
+                  <td className="px-4 py-2 text-slate-400 font-medium whitespace-nowrap">Lumps / Fired Input (−)</td>
+                  <td className="px-4 py-2 text-right text-slate-600 whitespace-nowrap">—</td>
+                  <td className="px-4 py-2 text-right text-slate-600 whitespace-nowrap">—</td>
+                  <td className={`px-4 py-2 text-right font-semibold whitespace-nowrap ${Number(prodBreakdownItem?.crushing_lumps || 0) > 0 ? 'text-emerald-400' : Number(prodBreakdownItem?.crushing_lumps || 0) < 0 ? 'text-rose-400' : 'text-slate-600'}`}>
+                    {Number(prodBreakdownItem?.crushing_lumps || 0) !== 0
+                      ? Number(prodBreakdownItem.crushing_lumps).toLocaleString(undefined, { maximumFractionDigits: 3 })
+                      : '—'}
+                  </td>
+                </tr>
+
+                {/* Row 5: Finished Goods Output */}
+                <tr className="hover:bg-slate-800/10 transition-colors duration-150">
+                  <td className="px-4 py-2 text-slate-400 font-medium whitespace-nowrap">Crushing Grains (+)</td>
+                  <td className="px-4 py-2 text-right text-slate-600 whitespace-nowrap">—</td>
+                  <td className="px-4 py-2 text-right text-slate-600 whitespace-nowrap">—</td>
+                  <td className={`px-4 py-2 text-right font-semibold whitespace-nowrap ${Number(prodBreakdownItem?.crushing_outputs || 0) > 0 ? 'text-emerald-400' : Number(prodBreakdownItem?.crushing_outputs || 0) < 0 ? 'text-rose-400' : 'text-slate-600'}`}>
+                    {Number(prodBreakdownItem?.crushing_outputs || 0) !== 0
+                      ? Number(prodBreakdownItem.crushing_outputs).toLocaleString(undefined, { maximumFractionDigits: 3 })
+                      : '—'}
+                  </td>
+                </tr>
+
+                {/* Column Total Row — highlighted like a footer */}
+                {(() => {
+                  const prodVal = (() => {
+                    const net = Number(prodBreakdownItem?.production_consumption || 0);
+                    const semiAdj = Number(prodBreakdownItem?.semi_fines || 0) + Number(prodBreakdownItem?.semi_grains || 0);
+                    const crushAdj = Number(prodBreakdownItem?.crushing_grains || 0) + Number(prodBreakdownItem?.crushing_fines || 0) + Number(prodBreakdownItem?.crushing_lumps || 0) + Number(prodBreakdownItem?.crushing_outputs || 0);
+                    return net - semiAdj - crushAdj;
+                  })();
+                  const semiVal = Number(prodBreakdownItem?.semi_fines || 0) + Number(prodBreakdownItem?.semi_grains || 0);
+                  const crushVal = Number(prodBreakdownItem?.crushing_grains || 0) + Number(prodBreakdownItem?.crushing_fines || 0) + Number(prodBreakdownItem?.crushing_lumps || 0) + Number(prodBreakdownItem?.crushing_outputs || 0);
+                  return (
+                    <tr className="border-t-2 border-emerald-800/60 bg-emerald-950/20">
+                      <td className="px-4 py-3 font-bold text-emerald-300 uppercase tracking-wider text-[11px] whitespace-nowrap">Column Total</td>
+                      <td className={`px-4 py-3 text-right font-black text-sm whitespace-nowrap ${prodVal < 0 ? 'text-rose-400' : prodVal > 0 ? 'text-emerald-400' : 'text-slate-500'}`}>
+                        {prodVal !== 0 ? prodVal.toLocaleString(undefined, { maximumFractionDigits: 3 }) : '—'}
+                      </td>
+                      <td className={`px-4 py-3 text-right font-black text-sm whitespace-nowrap ${semiVal < 0 ? 'text-rose-400' : semiVal > 0 ? 'text-emerald-400' : 'text-slate-500'}`}>
+                        {semiVal !== 0 ? (semiVal > 0 ? '+' : '') + semiVal.toLocaleString(undefined, { maximumFractionDigits: 3 }) : '—'}
+                      </td>
+                      <td className={`px-4 py-3 text-right font-black text-sm whitespace-nowrap ${crushVal < 0 ? 'text-rose-400' : crushVal > 0 ? 'text-emerald-400' : 'text-slate-500'}`}>
+                        {crushVal !== 0 ? (crushVal > 0 ? '+' : '') + crushVal.toLocaleString(undefined, { maximumFractionDigits: 3 }) : '—'}
+                      </td>
+                    </tr>
+                  );
+                })()}
+
+              </tbody>
+            </table>
+          </div>
+
+          <div className="pt-2 border-t border-slate-800 flex justify-end">
+            <button
+              onClick={() => {
+                setProdBreakdownModalOpen(false);
+                setProdBreakdownItem(null);
+              }}
+              className="px-4 py-2.5 rounded-lg bg-emerald-700 text-white text-xs font-semibold hover:bg-emerald-600 cursor-pointer transition-colors"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      </Modal>
+
     </div>
   );
 };
 
 export default BranchInventory;
+
