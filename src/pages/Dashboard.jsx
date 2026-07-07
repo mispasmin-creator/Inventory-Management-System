@@ -115,11 +115,13 @@ const Dashboard = () => {
       const branchFGSummaries = [];
 
       // Fetch all data in parallel at the global level
-      const [allRawItems, allFGItems, reports] = await Promise.all([
-        apiService.getInventory('All'),
-        apiService.getFinishGoodInventory('All'),
+      const [allRawItemsRes, allFGItemsRes, reports] = await Promise.all([
+        apiService.getInventory('All', '', 1, 100000),
+        apiService.getFinishGoodInventory('All', '', 1, 100000),
         apiService.getReports()
       ]);
+      const allRawItems = allRawItemsRes.data || [];
+      const allFGItems = allFGItemsRes.data || [];
 
       for (const bName of branchesToFetch) {
         const displayBranch = bName === 'Madhya' ? 'Pmmpl' : bName;
