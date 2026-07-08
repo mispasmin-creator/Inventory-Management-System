@@ -902,7 +902,6 @@ const BranchInventory = () => {
               data={displayedInventoryItems}
               searchPlaceholder="Search materials by name..."
               exportFileName={`${activeBranch}_${type}_inventory`}
-              disableSorting={true}
               serverSide={true}
               serverTotalItems={totalCount}
               serverCurrentPage={currentPage}

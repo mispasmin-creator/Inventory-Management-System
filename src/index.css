@@ -3,11 +3,13 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 :root {
-  --brand-green: #1e6b45;
-  --brand-green-mid: #25824f;
-  --brand-green-dark: #154d32;
-  --brand-green-soft: #eef7f2;
-  --brand-green-hover: #d6ede3;
+  /* Brand palette — matched to the Login screen's green/emerald design */
+  --brand-green: #047857;
+  --brand-green-light: #16a34a;
+  --brand-green-mid: #059669;
+  --brand-green-dark: #065f46;
+  --brand-green-soft: #f0fdf4;
+  --brand-green-hover: #dcfce7;
   --ink: #111827;
   --ink-muted: #4b5563;
   --ink-faint: #9ca3af;
@@ -19,11 +21,11 @@
   --sidebar-w: 256px;
 
   /* Accent Card Tints & Text colors adapted to Brand theme */
-  --card-bg-1: #eef7f2;
+  --card-bg-1: #f0fdf4;
   --card-bg-2: #f0f4ff;
   --card-bg-3: #fff2ed;
   --card-bg-4: #fffbeb;
-  --card-text-1: #1e6b45;
+  --card-text-1: #047857;
   --card-text-2: #4f46e5;
   --card-text-3: #ea580c;
   --card-text-4: #d97706;
@@ -138,11 +140,11 @@ body {
 ::-webkit-scrollbar { width: 5px; height: 5px; }
 ::-webkit-scrollbar-track { background: var(--surface-mid); }
 ::-webkit-scrollbar-thumb {
-  background: rgba(30, 107, 69, 0.30);
+  background: rgba(4, 120, 87, 0.30);
   border-radius: 3px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(30, 107, 69, 0.55);
+  background: rgba(4, 120, 87, 0.55);
 }
 
 /* ── Utility Layer ───────────────────────────────────────── */
@@ -153,14 +155,14 @@ body {
     background: var(--surface);
     border: 1px solid var(--line);
     box-shadow: 0 1px 4px rgba(17, 24, 39, 0.06), 0 4px 16px rgba(17, 24, 39, 0.04);
-    border-radius: 12px;
+    border-radius: 16px;
   }
 
   .glass-card-glow {
     background: var(--surface);
-    border: 1px solid rgba(30, 107, 69, 0.20);
-    box-shadow: 0 2px 8px rgba(30, 107, 69, 0.08), 0 8px 24px rgba(30, 107, 69, 0.06);
-    border-radius: 12px;
+    border: 1px solid rgba(4, 120, 87, 0.20);
+    box-shadow: 0 2px 8px rgba(4, 120, 87, 0.08), 0 8px 24px rgba(4, 120, 87, 0.08);
+    border-radius: 16px;
   }
 
   /* Inputs */
@@ -176,7 +178,7 @@ body {
   .glass-input:focus {
     border-color: var(--brand-green);
     outline: none;
-    box-shadow: 0 0 0 3px rgba(30, 107, 69, 0.12);
+    box-shadow: 0 0 0 3px rgba(4, 120, 87, 0.12);
   }
   .glass-input::placeholder { color: var(--ink-faint); }
 
@@ -184,7 +186,7 @@ body {
   .glass-sidebar {
     background: var(--surface);
     border-right: 1px solid var(--line);
-    box-shadow: 1px 0 0 var(--line);
+    box-shadow: 1px 0 0 var(--line), 6px 0 24px rgba(4, 120, 87, 0.05);
     position: relative;
     overflow: hidden;
   }
@@ -290,11 +292,11 @@ body {
 }
 [class*="border-indigo"],
 [class*="border-violet"] {
-  border-color: rgba(30, 107, 69, 0.28) !important;
+  border-color: rgba(4, 120, 87, 0.28) !important;
 }
 [class*="shadow-indigo"],
 [class*="shadow-violet"] {
-  box-shadow: 0 4px 16px rgba(30, 107, 69, 0.14) !important;
+  box-shadow: 0 4px 16px rgba(4, 120, 87, 0.14) !important;
 }
 [class*="from-indigo"][class*="to-violet"],
 [class*="from-indigo"][class*="to-violet"]:not([class*="bg-clip-text"]) {
@@ -354,6 +356,15 @@ button[class*="from-indigo"] {
 /* ── Main content logo watermark ─────────────────────────── */
 .main-content-area {
   position: relative;
+  background-image:
+    radial-gradient(640px circle at -8% -12%, rgba(22, 163, 74, 0.07), transparent 60%),
+    radial-gradient(640px circle at 108% 112%, rgba(4, 120, 87, 0.06), transparent 60%);
+  background-repeat: no-repeat;
+}
+html.dark .main-content-area {
+  background-image:
+    radial-gradient(640px circle at -8% -12%, rgba(37, 130, 79, 0.10), transparent 60%),
+    radial-gradient(640px circle at 108% 112%, rgba(37, 130, 79, 0.08), transparent 60%);
 }
 .main-content-area::before {
   content: '';

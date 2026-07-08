@@ -355,11 +355,12 @@ const buildCrushingActualLevelMap = async (selectedDate = '') => {
 
         if (productKey && rawQuantity !== null && rawQuantity !== '' && Number.isFinite(quantity)) {
           const productText = String(productName || '').toLowerCase();
-          const signedQuantity = productText.includes('grains') || productText.includes('fines')
-            ? quantity
-            : productText.includes('lumps') || productText.includes('fired')
-              ? -quantity
-              : 0;
+          // Any crushing input product is consumed (−) unless it's explicitly a
+          // produced grains/fines semi-good (+). Previously, product names that
+          // didn't literally contain "lumps"/"fired" (e.g. "Ferro Chrome Slag")
+          // fell through to 0 and their consumption was silently dropped.
+          const isProducedType = productText.includes('grains') || productText.includes('fines');
+          const signedQuantity = isProducedType ? quantity : -quantity;
           if (signedQuantity !== 0) {
             const key = `${firmKey}::${productKey}`;
             crushingAdjustmentMap[key] = (crushingAdjustmentMap[key] || 0) + signedQuantity;
@@ -367,7 +368,7 @@ const buildCrushingActualLevelMap = async (selectedDate = '') => {
               crushingGrainsMap[key] = (crushingGrainsMap[key] || 0) + signedQuantity;
             } else if (productText.includes('fines')) {
               crushingFinesMap[key] = (crushingFinesMap[key] || 0) + signedQuantity;
-            } else if (productText.includes('lumps') || productText.includes('fired')) {
+            } else {
               crushingLumpsMap[key] = (crushingLumpsMap[key] || 0) + signedQuantity;
             }
           }

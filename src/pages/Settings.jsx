@@ -66,6 +66,28 @@ const ALL_PAGE_GROUPS = [
 // Flat list of all keys for select-all
 const ALL_PAGE_KEYS = ALL_PAGE_GROUPS.flatMap(g => g.pages.map(p => p.key));
 
+// Group a user's raw page_access keys by category so "Purab Branch" etc. only
+// ever appears once per group instead of being repeated for every group that
+// happens to grant that branch (Raw Material / Finish Good / Stock Adjustment).
+const groupPageAccessBadges = (pageAccess = []) => {
+  const badges = [];
+  ALL_PAGE_GROUPS.forEach(grp => {
+    const matched = grp.pages.filter(pg => pageAccess.includes(pg.key));
+    if (matched.length === 0) return;
+    if (grp.group) {
+      badges.push({
+        key: grp.group,
+        icon: grp.icon,
+        label: `${grp.group}: ${matched.map(m => m.label.replace(' Branch', '')).join(', ')}`,
+        tone: 'group',
+      });
+    } else {
+      matched.forEach(pg => badges.push({ key: pg.key, icon: pg.icon, label: pg.label, tone: 'single' }));
+    }
+  });
+  return badges;
+};
+
 const ROLES = ['Admin', 'User', 'Viewer'];
 const BRANCH_OPTIONS = ['Purab', 'Pmmpl', 'Rkl'];
 const normalizeBranchName = (value) => value === 'Madhya' ? 'Pmmpl' : value;
@@ -287,9 +309,9 @@ const Settings = () => {
   // ── Role badge style ──────────────────────────────────────────────────────
   const roleBadge = (role) => {
     const map = {
-      Admin: 'bg-violet-950 text-violet-300 border-violet-500/20',
-      Manager: 'bg-indigo-950 text-indigo-300 border-indigo-500/20',
-      Viewer: 'bg-slate-800 text-slate-400 border-slate-700',
+      Admin: 'bg-(--brand-green-soft) text-(--brand-green-dark) border-(--brand-green)/25',
+      User: 'bg-sky-50 text-sky-700 border-sky-200 dark:bg-sky-950/20 dark:text-sky-400 dark:border-sky-900/30',
+      Viewer: 'bg-(--surface-mid) text-(--ink-muted) border-(--line)',
     };
     return map[role] || map.Viewer;
   };
@@ -463,7 +485,7 @@ const Settings = () => {
       )}
 
       {form.role === 'Admin' && (
-        <div className="flex items-center gap-2.5 px-3 py-2.5 rounded-lg bg-violet-950/20 border border-violet-500/15 text-xs text-violet-300">
+        <div className="flex items-center gap-2.5 px-3.5 py-3 rounded-xl bg-(--brand-green-soft) border border-(--brand-green)/20 text-xs font-semibold text-(--brand-green-dark)">
           <ShieldCheck className="w-4 h-4 shrink-0" />
           Admin role grants full access to all pages and all branches automatically.
         </div>
@@ -472,16 +494,16 @@ const Settings = () => {
   );
 
   return (
-    <div className="space-y-6 max-w-7xl mx-auto p-1.5 animate-slide-up">
+    <div className="space-y-6 max-w-7xl mx-auto p-1.5 animate-slide-up pb-12">
 
       {/* Title */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-(--line) pb-5">
         <div>
-          <h2 className="text-xl font-bold text-slate-100 flex items-center gap-2">
-            <SettingsIcon className="w-5 h-5 text-indigo-400" />
+          <h2 className="text-2xl font-black text-(--ink) tracking-tight flex items-center gap-2">
+            <SettingsIcon className="w-6 h-6 text-(--brand-green) dark:text-emerald-500" />
             <span>User Management</span>
           </h2>
-          <p className="text-xs text-slate-400 mt-1">
+          <p className="text-xs text-(--ink-muted) mt-1 font-medium">
             Create, edit, and manage system users, their roles, branch access, and page permissions.
           </p>
         </div>
@@ -489,7 +511,7 @@ const Settings = () => {
         {isAdmin && (
           <button
             onClick={openAdd}
-            className="flex items-center gap-1.5 px-4 py-2.5 text-xs rounded-lg bg-indigo-600 hover:bg-indigo-500 font-bold text-white shadow shadow-indigo-600/20 transition-colors cursor-pointer shrink-0"
+            className="flex items-center gap-2 px-5 py-2.5 text-xs rounded-xl bg-linear-to-r from-green-600 to-emerald-700 hover:brightness-105 font-bold text-white shadow-md shadow-green-500/20 transition-all duration-200 cursor-pointer shrink-0"
           >
             <Plus className="w-4 h-4" />
             New User
@@ -498,89 +520,97 @@ const Settings = () => {
       </div>
 
       {/* Users Table */}
-      <GlassCard className="p-4 overflow-hidden">
+      <GlassCard className="p-5 overflow-hidden">
         {loading ? (
           <TableSkeleton rows={5} cols={5} />
         ) : users.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-40 text-slate-500 text-sm gap-2">
+          <div className="flex flex-col items-center justify-center h-40 text-(--ink-faint) text-sm gap-2">
             <Users className="w-8 h-8 opacity-30" />
             <span>No users found</span>
           </div>
         ) : (
           <div>
             {/* Desktop Table View */}
-            <div className="hidden md:block max-h-[500px] overflow-auto">
+            <div className="hidden md:block max-h-[560px] overflow-auto">
               <table className="w-full text-xs border-collapse">
                 <thead className="sticky top-0 z-10">
-                  <tr className="border-b border-slate-800 bg-slate-900">
-                    <th className="text-left px-5 py-3.5 text-[10px] font-semibold text-slate-500 uppercase tracking-wider sticky top-0 bg-slate-900 z-10">Username</th>
-                    <th className="text-left px-5 py-3.5 text-[10px] font-semibold text-slate-500 uppercase tracking-wider sticky top-0 bg-slate-900 z-10">Role</th>
-                    <th className="text-left px-5 py-3.5 text-[10px] font-semibold text-slate-500 uppercase tracking-wider sticky top-0 bg-slate-900 z-10">Firm / Branch</th>
-                    <th className="text-left px-5 py-3.5 text-[10px] font-semibold text-slate-500 uppercase tracking-wider sticky top-0 bg-slate-900 z-10">Page Access</th>
-                    <th className="text-left px-5 py-3.5 text-[10px] font-semibold text-slate-500 uppercase tracking-wider sticky top-0 bg-slate-900 z-10">Created</th>
+                  <tr className="border-b border-(--line) bg-(--surface-mid)">
+                    <th className="text-left px-5 py-3.5 text-[10.5px] font-bold text-(--ink-muted) uppercase tracking-wider sticky top-0 bg-(--surface-mid) z-10">Username</th>
+                    <th className="text-left px-5 py-3.5 text-[10.5px] font-bold text-(--ink-muted) uppercase tracking-wider sticky top-0 bg-(--surface-mid) z-10">Role</th>
+                    <th className="text-left px-5 py-3.5 text-[10.5px] font-bold text-(--ink-muted) uppercase tracking-wider sticky top-0 bg-(--surface-mid) z-10">Firm / Branch</th>
+                    <th className="text-left px-5 py-3.5 text-[10.5px] font-bold text-(--ink-muted) uppercase tracking-wider sticky top-0 bg-(--surface-mid) z-10">Page Access</th>
+                    <th className="text-left px-5 py-3.5 text-[10.5px] font-bold text-(--ink-muted) uppercase tracking-wider sticky top-0 bg-(--surface-mid) z-10">Created</th>
                     {isAdmin && (
-                      <th className="text-right px-5 py-3.5 text-[10px] font-semibold text-slate-500 uppercase tracking-wider sticky top-0 bg-slate-900 z-10">Actions</th>
+                      <th className="text-right px-5 py-3.5 text-[10.5px] font-bold text-(--ink-muted) uppercase tracking-wider sticky top-0 bg-(--surface-mid) z-10">Actions</th>
                     )}
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-800/60">
+                <tbody className="divide-y divide-(--line-soft)">
                   {users.map(usr => (
-                    <tr key={usr.id} className="hover:bg-slate-800/20 transition-colors">
-                      <td className="px-5 py-3.5">
-                        <div className="flex items-center gap-2">
-                          <div className="w-7 h-7 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center text-[10px] font-bold text-slate-300 uppercase">
+                    <tr key={usr.id} className="hover:bg-(--brand-green-soft) transition-colors">
+                      <td className="px-5 py-4">
+                        <div className="flex items-center gap-2.5">
+                          <div className="w-8 h-8 rounded-full bg-(--surface-mid) border border-(--line) flex items-center justify-center text-[10px] font-bold text-(--ink-muted) uppercase">
                             {usr.username.slice(0, 2)}
                           </div>
-                          <span className="font-semibold text-slate-200">{usr.username}</span>
+                          <span className="font-semibold text-(--ink) text-[13px]">{usr.username}</span>
                         </div>
                       </td>
-                      <td className="px-5 py-3.5">
-                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border ${roleBadge(usr.role)}`}>
+                      <td className="px-5 py-4">
+                        <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider border ${roleBadge(usr.role)}`}>
                           {usr.role}
                         </span>
                       </td>
-                      <td className="px-5 py-3.5">
-                        <div className="flex items-center gap-1.5 text-slate-400">
-                          <Building2 className="w-3 h-3" />
+                      <td className="px-5 py-4">
+                        <div className="flex items-center gap-1.5 text-(--ink-muted) font-medium">
+                          <Building2 className="w-3.5 h-3.5" />
                           <span>{usr.firm_name === 'All' ? 'All Branches' : `${firmStringToArray(usr.firm_name).join(', ')} Branch`}</span>
                         </div>
                       </td>
-                      <td className="px-5 py-3.5">
+                      <td className="px-5 py-4">
                         {usr.role === 'Admin' ? (
-                          <span className="text-violet-400 flex items-center gap-1 text-[10px]">
-                            <ShieldCheck className="w-3 h-3" /> Full Access
+                          <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg text-[10px] font-bold text-(--brand-green-dark) bg-(--brand-green-soft) border border-(--brand-green)/20">
+                            <ShieldCheck className="w-3.5 h-3.5" /> Full Access
                           </span>
                         ) : (usr.page_access || []).length === 0 ? (
-                          <span className="text-slate-600 italic">No pages assigned</span>
+                          <span className="text-(--ink-faint) italic text-[11px]">No pages assigned</span>
                         ) : (
-                          <div className="flex flex-wrap gap-1">
-                            {(usr.page_access || []).map(p => {
-                              const pg = ALL_PAGE_GROUPS.flatMap(g => g.pages).find(pg => pg.key === p);
+                          <div className="flex flex-wrap gap-1.5">
+                            {groupPageAccessBadges(usr.page_access).map(b => {
+                              const Icon = b.icon;
                               return (
-                                <span key={p} className="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-400 text-[9px] font-medium">
-                                  {pg?.label || p}
+                                <span
+                                  key={b.key}
+                                  className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg border text-[10px] font-semibold ${
+                                    b.tone === 'group'
+                                      ? 'bg-(--brand-green-soft) border-(--brand-green)/20 text-(--brand-green-dark)'
+                                      : 'bg-(--surface-mid) border-(--line) text-(--ink-muted)'
+                                  }`}
+                                >
+                                  {Icon && <Icon className="w-3 h-3 shrink-0" />}
+                                  {b.label}
                                 </span>
                               );
                             })}
                           </div>
                         )}
                       </td>
-                      <td className="px-5 py-3.5 text-slate-500">
+                      <td className="px-5 py-4 text-(--ink-muted)">
                         {new Date(usr.created_at).toLocaleDateString()}
                       </td>
                       {isAdmin && (
-                        <td className="px-5 py-3.5">
-                          <div className="flex items-center gap-1.5 justify-end">
+                        <td className="px-5 py-4">
+                          <div className="flex items-center gap-2 justify-end">
                             <button
                               onClick={() => openEdit(usr)}
-                              className="p-1.5 rounded-lg bg-slate-800/60 border border-slate-700/50 text-slate-400 hover:text-indigo-300 hover:border-indigo-500/30 hover:bg-indigo-950/30 transition-all cursor-pointer"
+                              className="p-2 rounded-lg bg-(--surface-mid) border border-(--line) text-(--ink-muted) hover:text-(--brand-green-dark) hover:border-(--brand-green)/30 hover:bg-(--brand-green-soft) transition-all cursor-pointer"
                               title="Edit user"
                             >
-                              <Edit3 className="w-3.5 h-3.5 text-black" />
+                              <Edit3 className="w-3.5 h-3.5" />
                             </button>
                             <button
                               onClick={() => { setDeleteTarget(usr); setDeleteOpen(true); }}
-                              className="p-1.5 rounded-lg bg-slate-800/60 border border-slate-700/50 text-slate-400 hover:text-rose-300 hover:border-rose-500/30 hover:bg-rose-950/30 transition-all cursor-pointer"
+                              className="p-2 rounded-lg bg-(--surface-mid) border border-(--line) text-(--ink-muted) hover:text-rose-600 hover:border-rose-300 hover:bg-rose-50 dark:hover:bg-rose-950/30 transition-all cursor-pointer"
                               title="Delete user"
                             >
                               <Trash2 className="w-3.5 h-3.5" />
@@ -595,31 +625,31 @@ const Settings = () => {
             </div>
 
             {/* Mobile Card View */}
-            <div className="block md:hidden max-h-[500px] overflow-auto divide-y divide-slate-800/60">
+            <div className="block md:hidden max-h-[560px] overflow-auto divide-y divide-(--line-soft)">
               {users.map(usr => (
-                <div key={usr.id} className="p-4 space-y-3 hover:bg-slate-800/10 transition-colors">
+                <div key={usr.id} className="p-4 space-y-3 hover:bg-(--brand-green-soft) transition-colors">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2.5">
-                      <div className="w-8 h-8 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center text-[10px] font-bold text-slate-300 uppercase">
+                      <div className="w-9 h-9 rounded-full bg-(--surface-mid) border border-(--line) flex items-center justify-center text-[10px] font-bold text-(--ink-muted) uppercase">
                         {usr.username.slice(0, 2)}
                       </div>
                       <div>
-                        <span className="font-semibold text-slate-200 text-sm block">{usr.username}</span>
-                        <span className="text-[10px] text-slate-500">{new Date(usr.created_at).toLocaleDateString()}</span>
+                        <span className="font-semibold text-(--ink) text-sm block">{usr.username}</span>
+                        <span className="text-[10px] text-(--ink-faint)">{new Date(usr.created_at).toLocaleDateString()}</span>
                       </div>
                     </div>
                     {isAdmin && (
-                      <div className="flex items-center gap-1.5">
+                      <div className="flex items-center gap-2">
                         <button
                           onClick={() => openEdit(usr)}
-                          className="p-1.5 rounded-lg bg-slate-800/60 border border-slate-700/50 text-slate-400 hover:text-indigo-300 hover:border-indigo-500/30 hover:bg-indigo-950/30 transition-all cursor-pointer"
+                          className="p-2 rounded-lg bg-(--surface-mid) border border-(--line) text-(--ink-muted) hover:text-(--brand-green-dark) hover:border-(--brand-green)/30 hover:bg-(--brand-green-soft) transition-all cursor-pointer"
                           title="Edit user"
                         >
-                          <Edit3 className="w-3.5 h-3.5 text-black" />
+                          <Edit3 className="w-3.5 h-3.5" />
                         </button>
                         <button
                           onClick={() => { setDeleteTarget(usr); setDeleteOpen(true); }}
-                          className="p-1.5 rounded-lg bg-slate-800/60 border border-slate-700/50 text-slate-400 hover:text-rose-300 hover:border-rose-500/30 hover:bg-rose-950/30 transition-all cursor-pointer"
+                          className="p-2 rounded-lg bg-(--surface-mid) border border-(--line) text-(--ink-muted) hover:text-rose-600 hover:border-rose-300 hover:bg-rose-50 dark:hover:bg-rose-950/30 transition-all cursor-pointer"
                           title="Delete user"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
@@ -630,35 +660,43 @@ const Settings = () => {
 
                   <div className="grid grid-cols-2 gap-2.5 pt-1">
                     <div className="space-y-0.5">
-                      <span className="text-[9px] uppercase font-bold tracking-wider text-slate-500 block">Role</span>
+                      <span className="text-[9px] uppercase font-bold tracking-wider text-(--ink-faint) block">Role</span>
                       <span className={`inline-block px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider border ${roleBadge(usr.role)}`}>
                         {usr.role}
                       </span>
                     </div>
                     <div className="space-y-0.5">
-                      <span className="text-[9px] uppercase font-bold tracking-wider text-slate-500 block">Firm / Branch</span>
-                      <div className="flex items-center gap-1 text-slate-400 text-xs">
+                      <span className="text-[9px] uppercase font-bold tracking-wider text-(--ink-faint) block">Firm / Branch</span>
+                      <div className="flex items-center gap-1 text-(--ink-muted) text-xs font-medium">
                         <Building2 className="w-3.5 h-3.5 shrink-0" />
                         <span className="truncate">{usr.firm_name === 'All' ? 'All Branches' : `${firmStringToArray(usr.firm_name).join(', ')} Branch`}</span>
                       </div>
                     </div>
                   </div>
 
-                  <div className="space-y-1 pt-1 border-t border-slate-800/40">
-                    <span className="text-[9px] uppercase font-bold tracking-wider text-slate-500 block">Page Access</span>
+                  <div className="space-y-1 pt-1 border-t border-(--line-soft)">
+                    <span className="text-[9px] uppercase font-bold tracking-wider text-(--ink-faint) block">Page Access</span>
                     {usr.role === 'Admin' ? (
-                      <span className="text-violet-400 flex items-center gap-1 text-[10px]">
+                      <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg text-[10px] font-bold text-(--brand-green-dark) bg-(--brand-green-soft) border border-(--brand-green)/20">
                         <ShieldCheck className="w-3.5 h-3.5" /> Full Access
                       </span>
                     ) : (usr.page_access || []).length === 0 ? (
-                      <span className="text-slate-600 italic text-[11px]">No pages assigned</span>
+                      <span className="text-(--ink-faint) italic text-[11px]">No pages assigned</span>
                     ) : (
-                      <div className="flex flex-wrap gap-1">
-                        {(usr.page_access || []).map(p => {
-                          const pg = ALL_PAGE_GROUPS.flatMap(g => g.pages).find(pg => pg.key === p);
+                      <div className="flex flex-wrap gap-1.5">
+                        {groupPageAccessBadges(usr.page_access).map(b => {
+                          const Icon = b.icon;
                           return (
-                            <span key={p} className="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-400 text-[9px] font-medium">
-                              {pg?.label || p}
+                            <span
+                              key={b.key}
+                              className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg border text-[10px] font-semibold ${
+                                b.tone === 'group'
+                                  ? 'bg-(--brand-green-soft) border-(--brand-green)/20 text-(--brand-green-dark)'
+                                  : 'bg-(--surface-mid) border-(--line) text-(--ink-muted)'
+                              }`}
+                            >
+                              {Icon && <Icon className="w-3 h-3 shrink-0" />}
+                              {b.label}
                             </span>
                           );
                         })}

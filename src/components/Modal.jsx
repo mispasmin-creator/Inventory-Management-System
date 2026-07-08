@@ -62,14 +62,14 @@ const Modal = ({ isOpen, onClose, title, children, size = 'md' }) => {
               exit={{ opacity: 0, scale: 0.95, y: 15 }}
               transition={{ type: 'spring', damping: 25, stiffness: 350 }}
               style={{ pointerEvents: 'auto' }}
-              className={`w-full ${sizeClasses[size]} glass-card-glow text-slate-100 rounded-2xl shadow-2xl relative overflow-hidden border border-slate-700/50`}
+              className={`w-full ${sizeClasses[size]} glass-card-glow text-(--ink) rounded-2xl shadow-2xl relative overflow-hidden border border-(--line)`}
             >
               {/* Modal Header */}
-              <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800">
-                <h3 className="font-semibold text-base text-slate-100">{title}</h3>
+              <div className="flex items-center justify-between px-6 py-4 border-b border-(--line) bg-(--surface)">
+                <h3 className="font-bold text-base text-(--ink)">{title}</h3>
                 <button
                   onClick={onClose}
-                  className="p-1 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-slate-200 transition-colors cursor-pointer"
+                  className="p-1.5 rounded-lg hover:bg-(--surface-mid) text-(--ink-muted) hover:text-(--ink) transition-colors cursor-pointer"
                 >
                   <X className="w-5 h-5" />
                 </button>

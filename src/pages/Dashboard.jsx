@@ -22,7 +22,10 @@ import {
   ClipboardList,
   Building2,
   Search,
-  Sparkles
+  Sparkles,
+  ShoppingCart,
+  Factory,
+  RotateCcw
 } from 'lucide-react';
 import { 
   AreaChart, 
@@ -145,6 +148,9 @@ const Dashboard = () => {
           const itemName = item.item_name ?? item.itemName ?? '';
           const itemUnit = item.unit ?? 'Ton';
           const itemValuation = actualLevel * itemRate;
+          const purchaseQty = Number(item.purchase_system ?? 0);
+          const consumptionQty = Math.abs(Number(item.production_consumption ?? 0));
+          const rawSalesQty = Math.abs(Number(item.raw_material_sales ?? 0));
 
           if (itemUnit.toLowerCase() === 'ton' || itemUnit.toLowerCase() === 'mt') {
             aggregatedRawStock += actualLevel;
@@ -163,7 +169,10 @@ const Dashboard = () => {
             optimumStock,
             unit: itemUnit,
             rate: itemRate,
-            valuation: itemValuation
+            valuation: itemValuation,
+            purchaseQty,
+            consumptionQty,
+            rawSalesQty
           });
         });
 
@@ -195,6 +204,9 @@ const Dashboard = () => {
           const productionQty = Number(fgItem.production ?? 0);
           const salesQty = Number(fgItem.sales ?? 0);
           const productName = fgItem.product_name ?? fgItem.productName ?? '';
+          const purchaseReceivedQty = Number(fgItem.purchase_material_received ?? 0);
+          const salesReturnQty = Number(fgItem.sales_return ?? 0);
+          const purchaseReturnQty = Number(fgItem.purchase_return ?? 0);
 
           aggregatedFGStock += currentLevel;
           branchFGWeight += currentLevel;
@@ -209,7 +221,11 @@ const Dashboard = () => {
             salesOrderPending: pendingOrder,
             production: productionQty,
             sales: salesQty,
-            unit: 'Ton'
+            unit: 'Ton',
+            purchaseReceivedQty,
+            salesReturnQty,
+            purchaseReturnQty,
+            returnQty: salesReturnQty + purchaseReturnQty
           });
         });
 
@@ -502,6 +518,48 @@ const Dashboard = () => {
   const top5List = getTop5Data();
   const maxTop5Val = Math.max(...top5List.map(x => x.value), 1);
 
+  // Product-wise Purchase / Production / Sales / Returns summary (grouped across branches)
+  const getProductSummary = () => {
+    if (activeTab === 'raw_materials') {
+      const grouped = {};
+      filteredRaw.forEach(item => {
+        const key = item.itemName;
+        if (!grouped[key]) {
+          grouped[key] = { name: key, unit: item.unit, purchase: 0, production: 0, sales: 0, returns: 0, stock: 0 };
+        }
+        grouped[key].purchase += item.purchaseQty || 0;
+        grouped[key].production += item.consumptionQty || 0;
+        grouped[key].sales += item.rawSalesQty || 0;
+        grouped[key].stock += item.actualLevel || 0;
+      });
+      return Object.values(grouped).sort((a, b) => b.stock - a.stock);
+    }
+    const grouped = {};
+    filteredFG.forEach(item => {
+      const key = item.productName;
+      if (!grouped[key]) {
+        grouped[key] = { name: key, unit: item.unit, purchase: 0, production: 0, sales: 0, returns: 0, stock: 0 };
+      }
+      grouped[key].purchase += item.purchaseReceivedQty || 0;
+      grouped[key].production += item.production || 0;
+      grouped[key].sales += item.sales || 0;
+      grouped[key].returns += item.returnQty || 0;
+      grouped[key].stock += item.currentLevel || 0;
+    });
+    return Object.values(grouped).sort((a, b) => b.stock - a.stock);
+  };
+
+  const productSummaryList = getProductSummary();
+  const productionLabel = activeTab === 'raw_materials' ? 'Consumed in Production' : 'Production';
+  const salesLabel = activeTab === 'raw_materials' ? 'Raw Material Sales' : 'Sales / Dispatched';
+  const summaryTotals = productSummaryList.reduce((acc, p) => {
+    acc.purchase += p.purchase || 0;
+    acc.production += p.production || 0;
+    acc.sales += p.sales || 0;
+    acc.returns += p.returns || 0;
+    return acc;
+  }, { purchase: 0, production: 0, sales: 0, returns: 0 });
+
   if (loading) {
     return (
       <div className="max-w-7xl mx-auto p-1.5">
@@ -562,7 +620,7 @@ const Dashboard = () => {
             }}
             className={`flex items-center gap-2.5 px-7 py-3 rounded-xl text-xs font-bold uppercase tracking-wider transition-all duration-300 ${
               activeTab === 'raw_materials'
-                ? 'bg-linear-to-r from-emerald-600 to-teal-600 text-white shadow-md shadow-emerald-500/10'
+                ? 'bg-linear-to-r from-green-600 to-emerald-700 text-white shadow-md shadow-green-500/20'
                 : 'text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white'
             }`}
           >
@@ -577,7 +635,7 @@ const Dashboard = () => {
             }}
             className={`flex items-center gap-2.5 px-7 py-3 rounded-xl text-xs font-bold uppercase tracking-wider transition-all duration-300 ${
               activeTab === 'finished_goods'
-                ? 'bg-linear-to-r from-emerald-600 to-teal-600 text-white shadow-md shadow-emerald-500/10'
+                ? 'bg-linear-to-r from-green-600 to-emerald-700 text-white shadow-md shadow-green-500/20'
                 : 'text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white'
             }`}
           >
@@ -849,6 +907,114 @@ const Dashboard = () => {
         )}
       </div>
 
+      {/* 4.5 Product-wise Purchase / Production / Sales / Returns Summary */}
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <h3 className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+            <ClipboardList className="w-4 h-4 text-emerald-600 dark:text-emerald-500" />
+            <span>Product-wise Purchase, Production, Sales &amp; Returns</span>
+          </h3>
+          <span className="text-[10px] text-slate-400 dark:text-slate-500 font-semibold">
+            {productSummaryList.length} {activeTab === 'raw_materials' ? 'raw materials' : 'products'} tracked
+          </span>
+        </div>
+
+        {/* Totals KPI Row */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="rounded-2xl p-4.5 border border-(--line) bg-(--surface) border-l-4 border-l-sky-500 shadow-sm">
+            <div className="flex justify-between items-start">
+              <p className="text-slate-500 dark:text-slate-400 text-[11px] font-bold uppercase tracking-wider">Total Purchase</p>
+              <ShoppingCart className="w-4 h-4 text-sky-600 dark:text-sky-400" />
+            </div>
+            <div className={`font-extrabold tracking-tight text-(--ink) mt-3 ${getFontSizeClass(summaryTotals.purchase.toFixed(0))}`}>
+              {summaryTotals.purchase.toLocaleString(undefined, { maximumFractionDigits: 1 })}
+              <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 ml-1">Tons</span>
+            </div>
+          </div>
+
+          <div className="rounded-2xl p-4.5 border border-(--line) bg-(--surface) border-l-4 border-l-violet-500 shadow-sm">
+            <div className="flex justify-between items-start">
+              <p className="text-slate-500 dark:text-slate-400 text-[11px] font-bold uppercase tracking-wider">{productionLabel}</p>
+              <Factory className="w-4 h-4 text-violet-600 dark:text-violet-400" />
+            </div>
+            <div className={`font-extrabold tracking-tight text-(--ink) mt-3 ${getFontSizeClass(summaryTotals.production.toFixed(0))}`}>
+              {summaryTotals.production.toLocaleString(undefined, { maximumFractionDigits: 1 })}
+              <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 ml-1">Tons</span>
+            </div>
+          </div>
+
+          <div className="rounded-2xl p-4.5 border border-(--line) bg-(--surface) border-l-4 border-l-emerald-600 shadow-sm">
+            <div className="flex justify-between items-start">
+              <p className="text-slate-500 dark:text-slate-400 text-[11px] font-bold uppercase tracking-wider">{salesLabel}</p>
+              <Truck className="w-4 h-4 text-emerald-700 dark:text-emerald-500" />
+            </div>
+            <div className={`font-extrabold tracking-tight text-(--ink) mt-3 ${getFontSizeClass(summaryTotals.sales.toFixed(0))}`}>
+              {summaryTotals.sales.toLocaleString(undefined, { maximumFractionDigits: 1 })}
+              <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 ml-1">Tons</span>
+            </div>
+          </div>
+
+          <div className="rounded-2xl p-4.5 border border-(--line) bg-(--surface) border-l-4 border-l-rose-500 shadow-sm">
+            <div className="flex justify-between items-start">
+              <p className="text-slate-500 dark:text-slate-400 text-[11px] font-bold uppercase tracking-wider">Total Returns</p>
+              <RotateCcw className="w-4 h-4 text-rose-600 dark:text-rose-400" />
+            </div>
+            <div className={`font-extrabold tracking-tight text-(--ink) mt-3 ${getFontSizeClass(summaryTotals.returns.toFixed(0))}`}>
+              {summaryTotals.returns.toLocaleString(undefined, { maximumFractionDigits: 1 })}
+              <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 ml-1">Tons</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Per-product breakdown table */}
+        <GlassCard className="space-y-3">
+          <div className="overflow-x-auto max-h-[420px]">
+            <table className="w-full text-left text-xs border-collapse">
+              <thead>
+                <tr className="bg-slate-50 dark:bg-[#171f17] text-slate-500 uppercase tracking-wider border-b border-slate-200 dark:border-[#2e382d]">
+                  <th className="px-4 py-2.5 font-bold">Product</th>
+                  <th className="px-4 py-2.5 font-bold text-right">Purchase</th>
+                  <th className="px-4 py-2.5 font-bold text-right">{productionLabel}</th>
+                  <th className="px-4 py-2.5 font-bold text-right">{salesLabel}</th>
+                  <th className="px-4 py-2.5 font-bold text-right">Returns</th>
+                  <th className="px-4 py-2.5 font-bold text-right">Current Stock</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 dark:divide-[#2e382d]">
+                {productSummaryList.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="px-4 py-6 text-center text-slate-400 dark:text-slate-500">
+                      No products match the selected branch/filter.
+                    </td>
+                  </tr>
+                ) : (
+                  productSummaryList.map((p, idx) => (
+                    <tr key={idx} className="hover:bg-slate-50/50 dark:hover:bg-brand-green-soft">
+                      <td className="px-4 py-2.5 font-semibold text-(--ink)">{p.name}</td>
+                      <td className="px-4 py-2.5 text-right text-sky-700 dark:text-sky-400 font-bold">
+                        {p.purchase.toLocaleString(undefined, { maximumFractionDigits: 1 })} {p.unit}
+                      </td>
+                      <td className="px-4 py-2.5 text-right text-violet-700 dark:text-violet-400 font-bold">
+                        {p.production.toLocaleString(undefined, { maximumFractionDigits: 1 })} {p.unit}
+                      </td>
+                      <td className="px-4 py-2.5 text-right text-emerald-700 dark:text-emerald-400 font-bold">
+                        {p.sales.toLocaleString(undefined, { maximumFractionDigits: 1 })} {p.unit}
+                      </td>
+                      <td className="px-4 py-2.5 text-right text-rose-600 dark:text-rose-400 font-bold">
+                        {p.returns.toLocaleString(undefined, { maximumFractionDigits: 1 })} {p.unit}
+                      </td>
+                      <td className="px-4 py-2.5 text-right font-black text-(--ink)">
+                        {p.stock.toLocaleString(undefined, { maximumFractionDigits: 1 })} {p.unit}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </GlassCard>
+      </div>
+
       {/* 5. Top 5 Performance, Deficits, & Valuation Section */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         
@@ -873,7 +1039,7 @@ const Dashboard = () => {
                   className={`px-3 py-1.5 rounded-lg transition-all duration-200 ${
                     top5SubTab === 'best'
                       ? 'bg-(--surface) text-emerald-600 dark:text-emerald-400 shadow-sm'
-                      : 'text-slate-500'
+                      : 'text-(--ink-faint) hover:text-(--ink-muted)'
                   }`}
                 >
                   Best Stocks
@@ -883,7 +1049,7 @@ const Dashboard = () => {
                   className={`px-3 py-1.5 rounded-lg transition-all duration-200 ${
                     top5SubTab === 'worst'
                       ? 'bg-(--surface) text-rose-600 dark:text-rose-400 shadow-sm'
-                      : 'text-slate-500'
+                      : 'text-(--ink-faint) hover:text-(--ink-muted)'
                   }`}
                 >
                   Worst / Shortages
@@ -893,7 +1059,7 @@ const Dashboard = () => {
                   className={`px-3 py-1.5 rounded-lg transition-all duration-200 ${
                     top5SubTab === 'valuation'
                       ? 'bg-(--surface) text-indigo-600 dark:text-indigo-400 shadow-sm'
-                      : 'text-slate-500'
+                      : 'text-(--ink-faint) hover:text-(--ink-muted)'
                   }`}
                 >
                   {activeTab === 'raw_materials' ? 'Valuation' : 'Dispatches'}
@@ -1118,32 +1284,32 @@ const Dashboard = () => {
 
       {/* 7. Detailed Stock Master Breakdown Table */}
       <GlassCard className="space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 dark:border-[#2e382d] pb-2">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-(--line) pb-3">
           <div>
             <h3 className="text-sm font-black text-(--ink) uppercase tracking-wide">
               {activeTab === 'raw_materials' ? 'Raw Materials Inventory Ledger' : 'Finished Goods Inventory Ledger'}
             </h3>
-            <p className="text-[10px] text-slate-400">
+            <p className="text-[10px] text-(--ink-faint) mt-0.5">
               Showing {activeTab === 'raw_materials' ? filteredRaw.length : filteredFG.length} tracked items for selected filters.
             </p>
           </div>
         </div>
 
-        <div className="overflow-x-auto max-h-[380px]">
+        <div className="overflow-x-auto max-h-[420px] rounded-xl border border-(--line)">
           {activeTab === 'raw_materials' ? (
             <table className="w-full text-left text-xs border-collapse">
               <thead>
-                <tr className="bg-slate-50 dark:bg-[#171f17] text-slate-500 uppercase tracking-wider border-b border-slate-200">
-                  <th className="px-4 py-2.5 font-bold">Material Name</th>
-                  <th className="px-4 py-2.5 font-bold">Branch</th>
-                  <th className="px-4 py-2.5 font-bold text-right">Actual Stock</th>
-                  <th className="px-4 py-2.5 font-bold text-right">Optimum Buffer</th>
-                  <th className="px-4 py-2.5 font-bold text-right">Unit rate</th>
-                  <th className="px-4 py-2.5 font-bold text-right">Total Valuation</th>
-                  <th className="px-4 py-2.5 font-bold text-center">Status</th>
+                <tr className="bg-(--surface-mid) text-(--ink-muted) uppercase tracking-wider border-b border-(--line) sticky top-0 z-10">
+                  <th className="px-4 py-3 font-bold text-[10.5px]">Material Name</th>
+                  <th className="px-4 py-3 font-bold text-[10.5px]">Branch</th>
+                  <th className="px-4 py-3 font-bold text-[10.5px] text-right">Actual Stock</th>
+                  <th className="px-4 py-3 font-bold text-[10.5px] text-right">Optimum Buffer</th>
+                  <th className="px-4 py-3 font-bold text-[10.5px] text-right">Unit rate</th>
+                  <th className="px-4 py-3 font-bold text-[10.5px] text-right">Total Valuation</th>
+                  <th className="px-4 py-3 font-bold text-[10.5px] text-center">Status</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100 dark:divide-[#2e382d]">
+              <tbody className="divide-y divide-(--line-soft)">
                 {filteredRaw.map((item, idx) => {
                   const actualLevel = item.actualLevel ?? 0;
                   const optimumStock = item.optimumStock ?? 0;
@@ -1151,15 +1317,15 @@ const Dashboard = () => {
                   const rate = item.rate ?? 0;
                   const valuation = item.valuation ?? 0;
                   return (
-                    <tr key={idx} className="hover:bg-slate-50/50 dark:hover:bg-brand-green-soft">
+                    <tr key={idx} className="hover:bg-(--brand-green-soft) transition-colors duration-150">
                       <td className="px-4 py-2.5 font-semibold text-(--ink)">{item.itemName}</td>
-                      <td className="px-4 py-2.5 text-slate-500 font-bold uppercase">{item.branchName}</td>
+                      <td className="px-4 py-2.5 text-(--ink-muted) font-bold uppercase">{item.branchName}</td>
                       <td className={`px-4 py-2.5 text-right font-black ${isLow ? 'text-rose-600' : 'text-(--ink)'}`}>
                         {actualLevel.toLocaleString(undefined, { maximumFractionDigits: 1 })} {item.unit}
                       </td>
-                      <td className="px-4 py-2.5 text-right text-slate-500">{optimumStock.toLocaleString()} {item.unit}</td>
-                      <td className="px-4 py-2.5 text-right text-slate-500">₹{rate.toLocaleString(undefined, { maximumFractionDigits: 0 })}</td>
-                      <td className="px-4 py-2.5 text-right font-bold text-slate-600 dark:text-slate-400">₹{valuation.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
+                      <td className="px-4 py-2.5 text-right text-(--ink-muted)">{optimumStock.toLocaleString()} {item.unit}</td>
+                      <td className="px-4 py-2.5 text-right text-(--ink-muted)">₹{rate.toLocaleString(undefined, { maximumFractionDigits: 0 })}</td>
+                      <td className="px-4 py-2.5 text-right font-bold text-(--ink-muted)">₹{valuation.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
                       <td className="px-4 py-2.5 text-center">
                         {isLow ? (
                           <span className="px-2 py-0.5 rounded text-[10px] font-black bg-rose-100 text-rose-800 border border-rose-200 dark:bg-rose-950/20 dark:text-rose-400 dark:border-rose-900/30">
@@ -1179,17 +1345,17 @@ const Dashboard = () => {
           ) : (
             <table className="w-full text-left text-xs border-collapse">
               <thead>
-                <tr className="bg-slate-50 dark:bg-[#171f17] text-slate-500 uppercase tracking-wider border-b border-slate-200">
-                  <th className="px-4 py-2.5 font-bold">Product Name</th>
-                  <th className="px-4 py-2.5 font-bold">Branch</th>
-                  <th className="px-4 py-2.5 font-bold text-right">Available Stock</th>
-                  <th className="px-4 py-2.5 font-bold text-right">Production</th>
-                  <th className="px-4 py-2.5 font-bold text-right">Sales / Dispatched</th>
-                  <th className="px-4 py-2.5 font-bold text-right">Pending Backlog</th>
-                  <th className="px-4 py-2.5 font-bold text-center">Fulfillment Status</th>
+                <tr className="bg-(--surface-mid) text-(--ink-muted) uppercase tracking-wider border-b border-(--line) sticky top-0 z-10">
+                  <th className="px-4 py-3 font-bold text-[10.5px]">Product Name</th>
+                  <th className="px-4 py-3 font-bold text-[10.5px]">Branch</th>
+                  <th className="px-4 py-3 font-bold text-[10.5px] text-right">Available Stock</th>
+                  <th className="px-4 py-3 font-bold text-[10.5px] text-right">Production</th>
+                  <th className="px-4 py-3 font-bold text-[10.5px] text-right">Sales / Dispatched</th>
+                  <th className="px-4 py-3 font-bold text-[10.5px] text-right">Pending Backlog</th>
+                  <th className="px-4 py-3 font-bold text-[10.5px] text-center">Fulfillment Status</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100 dark:divide-[#2e382d]">
+              <tbody className="divide-y divide-(--line-soft)">
                 {filteredFG.map((item, idx) => {
                   const currentLevel = item.currentLevel ?? 0;
                   const pending = item.salesOrderPending ?? 0;
@@ -1197,15 +1363,15 @@ const Dashboard = () => {
                   const production = item.production ?? 0;
                   const sales = item.sales ?? 0;
                   return (
-                    <tr key={idx} className="hover:bg-slate-50/50 dark:hover:bg-brand-green-soft">
+                    <tr key={idx} className="hover:bg-(--brand-green-soft) transition-colors duration-150">
                       <td className="px-4 py-2.5 font-semibold text-(--ink)">{item.productName}</td>
-                      <td className="px-4 py-2.5 text-slate-500 font-bold uppercase">{item.branchName}</td>
+                      <td className="px-4 py-2.5 text-(--ink-muted) font-bold uppercase">{item.branchName}</td>
                       <td className={`px-4 py-2.5 text-right font-black ${hasShortage ? 'text-rose-600' : 'text-(--ink)'}`}>
                         {currentLevel.toLocaleString(undefined, { maximumFractionDigits: 1 })} {item.unit || 'Tons'}
                       </td>
-                      <td className="px-4 py-2.5 text-right text-slate-500">{production.toLocaleString()} Tons</td>
-                      <td className="px-4 py-2.5 text-right text-slate-500">{sales.toLocaleString()} Tons</td>
-                      <td className="px-4 py-2.5 text-right text-slate-500">{pending.toLocaleString()} Tons</td>
+                      <td className="px-4 py-2.5 text-right text-(--ink-muted)">{production.toLocaleString()} Tons</td>
+                      <td className="px-4 py-2.5 text-right text-(--ink-muted)">{sales.toLocaleString()} Tons</td>
+                      <td className="px-4 py-2.5 text-right text-(--ink-muted)">{pending.toLocaleString()} Tons</td>
                       <td className="px-4 py-2.5 text-center">
                         {hasShortage ? (
                           <span className="px-2 py-0.5 rounded text-[10px] font-black bg-rose-100 text-rose-800 border border-rose-200 dark:bg-rose-950/20 dark:text-rose-400 dark:border-rose-900/30">
