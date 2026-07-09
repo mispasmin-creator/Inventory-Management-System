@@ -11,6 +11,7 @@ const Table = ({
   exportFileName = "report",
   actions = null,
   legend = null,
+  legendKey = null,
   disableSorting = false,
   serverSide = false,
   serverTotalItems = 0,
@@ -27,6 +28,12 @@ const Table = ({
   const [sortConfig, setSortConfig] = useState({ key: null, direction: 'asc' });
   const [localCurrentPage, setLocalCurrentPage] = useState(1);
   const [localPageSize, setLocalPageSize] = useState(100);
+  const [activeLegendValue, setActiveLegendValue] = useState(null);
+
+  const handleLegendClick = (value) => {
+    setActiveLegendValue(prev => (prev === value ? null : value));
+    if (!serverSide) setLocalCurrentPage(1);
+  };
 
   const searchQuery = localSearchQuery;
   const filterValue = localFilterValue;
@@ -86,6 +93,15 @@ const Table = ({
       }
     }
 
+    // Legend click-to-filter: applies to whatever rows are currently loaded,
+    // independent of serverSide (server pagination/search stay untouched).
+    if (legendKey && activeLegendValue) {
+      result = result.filter(row => {
+        const val = row[legendKey];
+        return val && String(val).trim().toLowerCase() === String(activeLegendValue).trim().toLowerCase();
+      });
+    }
+
     // 3. Apply sorting
     if (sortConfig.key) {
       result.sort((a, b) => {
@@ -108,7 +124,7 @@ const Table = ({
     }
 
     return result;
-  }, [data, searchQuery, filterValue, filterKey, sortConfig, serverSide]);
+  }, [data, searchQuery, filterValue, filterKey, sortConfig, serverSide, legendKey, activeLegendValue]);
 
   // Pagination calculation
   const totalItems = serverSide ? serverTotalItems : processedData.length;
@@ -208,15 +224,25 @@ const Table = ({
         </div>
       </div>
 
-      {/* Colour-coding legend */}
+      {/* Colour-coding legend (click a pill to filter the table to that status) */}
       {legend && legend.length > 0 && (
         <div className="status-legend">
-          {legend.map((item, idx) => (
-            <span key={idx} className="status-legend-pill">
-              <span className="status-legend-swatch" style={{ background: item.color }} />
-              {item.label}
-            </span>
-          ))}
+          {legend.map((item, idx) => {
+            const clickable = Boolean(legendKey && item.value !== undefined);
+            const isActive = clickable && activeLegendValue === item.value;
+            return (
+              <button
+                key={idx}
+                type="button"
+                onClick={clickable ? () => handleLegendClick(item.value) : undefined}
+                className={`status-legend-pill${clickable ? ' status-legend-pill--clickable' : ''}${isActive ? ' is-active' : ''}`}
+                style={isActive ? { borderColor: item.color, boxShadow: `0 0 0 2px ${item.color}33` } : undefined}
+              >
+                <span className="status-legend-swatch" style={{ background: item.color }} />
+                {item.label}
+              </button>
+            );
+          })}
         </div>
       )}
 

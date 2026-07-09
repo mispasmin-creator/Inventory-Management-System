@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { useAuth } from '../hooks/useAuth';
 import { useToast } from '../components/Toast';
@@ -12,6 +12,15 @@ const Login = () => {
     const navigate = useNavigate();
     const [showPassword, setShowPassword] = useState(false);
     const [loading, setLoading] = useState(false);
+
+    // The dark/light theme class on <html> is normally applied by Header.jsx,
+    // which isn't mounted on this route — apply the saved preference here too
+    // so the login page matches the rest of the app instead of always being light.
+    useEffect(() => {
+        const isDark = localStorage.getItem('theme') === 'dark';
+        document.documentElement.classList.toggle('dark', isDark);
+        document.documentElement.setAttribute('data-theme', isDark ? 'dark' : 'light');
+    }, []);
 
     const {
         register,
@@ -34,12 +43,12 @@ const Login = () => {
     };
 
     return (
-        <div className="relative flex min-h-screen w-full items-center justify-center overflow-hidden bg-gradient-to-br from-green-50 via-white to-emerald-50 p-4">
+        <div className="relative flex min-h-screen w-full items-center justify-center overflow-hidden bg-gradient-to-br from-green-50 via-white to-emerald-50 dark:from-[#0a0d0a] dark:via-[#121812] dark:to-[#0a0d0a] p-4">
             {/* Decorative blurred circles - dark green tones */}
             <div className="pointer-events-none absolute inset-0 overflow-hidden">
-                <div className="absolute -left-32 -top-32 h-96 w-96 rounded-full bg-green-200/40 blur-3xl" />
-                <div className="absolute -bottom-32 -right-32 h-96 w-96 rounded-full bg-emerald-200/40 blur-3xl" />
-                <div className="absolute left-1/2 top-1/2 h-80 w-80 -translate-x-1/2 -translate-y-1/2 rounded-full bg-teal-100/30 blur-3xl" />
+                <div className="absolute -left-32 -top-32 h-96 w-96 rounded-full bg-green-200/40 dark:bg-emerald-500/10 blur-3xl" />
+                <div className="absolute -bottom-32 -right-32 h-96 w-96 rounded-full bg-emerald-200/40 dark:bg-emerald-600/10 blur-3xl" />
+                <div className="absolute left-1/2 top-1/2 h-80 w-80 -translate-x-1/2 -translate-y-1/2 rounded-full bg-teal-100/30 dark:bg-teal-500/10 blur-3xl" />
             </div>
 
             {/* Main Card */}
@@ -47,7 +56,7 @@ const Login = () => {
                 initial={{ opacity: 0, y: 30, scale: 0.95 }}
                 animate={{ opacity: 1, y: 0, scale: 1 }}
                 transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-                className="relative z-10 w-full max-w-[400px] rounded-3xl bg-white/80 p-8 shadow-2xl shadow-green-200/60 backdrop-blur-xl ring-1 ring-white/50"
+                className="relative z-10 w-full max-w-[400px] rounded-3xl bg-white/80 dark:bg-[#121812]/90 p-8 shadow-2xl shadow-green-200/60 dark:shadow-black/40 backdrop-blur-xl ring-1 ring-white/50 dark:ring-white/10"
             >
                 {/* Brand Section */}
                 <div className="mb-8 text-center">
@@ -63,25 +72,25 @@ const Login = () => {
                             className="h-14 w-14 rounded-xl object-cover"
                         />
                     </motion.div>
-                    <h2 className="text-2xl font-bold text-slate-800">Passary IMS</h2>
-                    <p className="mt-1 text-sm text-slate-500">Inventory Management System</p>
+                    <h2 className="text-2xl font-bold text-slate-800 dark:text-slate-100">Passary IMS</h2>
+                    <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Inventory Management System</p>
                 </div>
 
                 {/* Form */}
                 <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
                     {/* Username */}
                     <div>
-                        <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-slate-400">
+                        <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">
                             Username
                         </label>
                         <div className="relative group">
-                            <User className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400 transition-colors group-focus-within:text-green-700" />
+                            <User className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400 dark:text-slate-500 transition-colors group-focus-within:text-green-700 dark:group-focus-within:text-emerald-400" />
                             <input
                                 type="text"
                                 placeholder="Enter your username"
                                 {...register('username', { required: 'Username is required' })}
-                                className={`w-full rounded-xl border border-slate-200 bg-white/60 py-3 pl-10 pr-4 text-sm text-slate-700 placeholder:text-slate-400 transition-all duration-200 focus:border-green-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-green-300/60 ${
-                                    errors.username ? 'border-red-300 focus:border-red-300 focus:ring-red-200/60' : ''
+                                className={`w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-white/60 dark:bg-white/5 py-3 pl-10 pr-4 text-sm text-slate-700 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 transition-all duration-200 focus:border-green-400 dark:focus:border-emerald-500 focus:bg-white dark:focus:bg-white/10 focus:outline-none focus:ring-2 focus:ring-green-300/60 dark:focus:ring-emerald-500/30 ${
+                                    errors.username ? 'border-red-300 dark:border-red-500/60 focus:border-red-300 dark:focus:border-red-500/60 focus:ring-red-200/60 dark:focus:ring-red-500/20' : ''
                                 }`}
                             />
                         </div>
@@ -98,23 +107,23 @@ const Login = () => {
 
                     {/* Password */}
                     <div>
-                        <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-slate-400">
+                        <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">
                             Password
                         </label>
                         <div className="relative group">
-                            <Lock className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400 transition-colors group-focus-within:text-green-700" />
+                            <Lock className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400 dark:text-slate-500 transition-colors group-focus-within:text-green-700 dark:group-focus-within:text-emerald-400" />
                             <input
                                 type={showPassword ? 'text' : 'password'}
                                 placeholder="Enter your password"
                                 {...register('password', { required: 'Password is required' })}
-                                className={`w-full rounded-xl border border-slate-200 bg-white/60 py-3 pl-10 pr-12 text-sm text-slate-700 placeholder:text-slate-400 transition-all duration-200 focus:border-green-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-green-300/60 ${
-                                    errors.password ? 'border-red-300 focus:border-red-300 focus:ring-red-200/60' : ''
+                                className={`w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-white/60 dark:bg-white/5 py-3 pl-10 pr-12 text-sm text-slate-700 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 transition-all duration-200 focus:border-green-400 dark:focus:border-emerald-500 focus:bg-white dark:focus:bg-white/10 focus:outline-none focus:ring-2 focus:ring-green-300/60 dark:focus:ring-emerald-500/30 ${
+                                    errors.password ? 'border-red-300 dark:border-red-500/60 focus:border-red-300 dark:focus:border-red-500/60 focus:ring-red-200/60 dark:focus:ring-red-500/20' : ''
                                 }`}
                             />
                             <button
                                 type="button"
                                 onClick={() => setShowPassword(!showPassword)}
-                                className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 transition-colors hover:text-slate-600 focus:outline-none"
+                                className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500 transition-colors hover:text-slate-600 dark:hover:text-slate-300 focus:outline-none"
                             >
                                 {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                             </button>
@@ -157,8 +166,8 @@ const Login = () => {
                 </form>
 
                 {/* Footer - minimal */}
-                <div className="mt-6 border-t border-slate-200/80 pt-4 text-center">
-                    <p className="text-[10px] text-slate-400">Secure access for authorized users</p>
+                <div className="mt-6 border-t border-slate-200/80 dark:border-slate-700/50 pt-4 text-center">
+                    <p className="text-[10px] text-slate-400 dark:text-slate-500">Secure access for authorized users</p>
                 </div>
             </motion.div>
         </div>

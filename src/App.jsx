@@ -11,7 +11,7 @@ import Dashboard from './pages/Dashboard';
 import BranchInventory from './pages/BranchInventory';
 import Purchase from './pages/Purchase';
 import Dispatch from './pages/Dispatch';
-import Crushing from './pages/Crushing';
+import Crushing from './pages/Crushing'; 
 import PmmplRate from './pages/PmmplRate';
 import Reports from './pages/Reports';
 import Settings from './pages/Settings';

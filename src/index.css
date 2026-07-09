@@ -276,6 +276,17 @@ html.dark .app-shell {
   font-weight: 700;
   color: var(--ink);
 }
+.status-legend-pill--clickable {
+  cursor: pointer;
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+.status-legend-pill--clickable:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(17, 24, 39, 0.14);
+}
+.status-legend-pill.is-active {
+  background: var(--surface-mid);
+}
 .status-legend-swatch {
   width: 14px;
   height: 14px;

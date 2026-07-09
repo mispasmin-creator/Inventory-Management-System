@@ -672,7 +672,8 @@ const BranchInventory = () => {
         stock_adjustment: firmAdjustmentTotal + legacyAdjustmentTotal,
         actual_level: adjustedActualLevel,
         d_con: calculatedDCon,
-        colour: status
+        colour: status,
+        colour_group: getColourForStatus(status)
       };
     });
   }, [inventoryItems, rawFactoryEntries, type]);
@@ -944,11 +945,12 @@ const BranchInventory = () => {
               searchPlaceholder="Search materials by name..."
               exportFileName={`${activeBranch}_${type}_inventory`}
               legend={!isFinishGood ? [
-                { label: 'Excess Stock (>100%)', color: '#a855f7' },
-                { label: 'Normal Stock (66-100%)', color: '#16a34a' },
-                { label: 'Medium Stock (33-66%)', color: '#f59e0b' },
-                { label: 'Low Stock (<33%)', color: '#ef4444' },
+                { label: 'Excess Stock (>100%)', color: '#a855f7', value: 'Purple' },
+                { label: 'Normal Stock (66-100%)', color: '#16a34a', value: 'Green' },
+                { label: 'Medium Stock (33-66%)', color: '#f59e0b', value: 'Orange' },
+                { label: 'Low Stock (<33%)', color: '#ef4444', value: 'Red' },
               ] : null}
+              legendKey={!isFinishGood ? 'colour_group' : undefined}
               serverSide={true}
               serverTotalItems={totalCount}
               serverCurrentPage={currentPage}
