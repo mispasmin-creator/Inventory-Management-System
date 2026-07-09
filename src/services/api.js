@@ -888,6 +888,31 @@ const buildFinishedGoodAdjustmentMap = async (selectedDate = '') => {
   return adjustmentMap;
 };
 
+// Packaging items whose Product Rate is computed as (Billing Qty * Rate) / Total Bag Qty
+// instead of using the plain "Rate" column.
+const BAG_RATE_ITEM_KEYS = new Set([
+  'Pasheat-CLC PP Bags 25 Kg',
+  'PP Bag (25 kgs)',
+  'Pp Bag (50 kgs)',
+  'PP BAG B - 25',
+  'PP BAG R - 25'
+].map(normalizeItemKey));
+
+// Items whose LIFT-ACCOUNTS "Rate" is stored per 1000 units, so the Product Rate is divided by 1000.
+const RATE_DIVIDE_BY_1000_ITEM_KEYS = new Set([
+  'Light Diesel Oil'
+].map(normalizeItemKey));
+
+// Same "Unload Approval" completion filter used for the packaging bag rate calculation.
+const isUnloadApprovalComplete = (row) => {
+  const status = row['Unload Approval Status'];
+  const required = row['Unload Approval Required'];
+  if (status === 'Rejected' || status === 'Completed') return true;
+  if (status === 'Approved' && required !== 'Yes') return true;
+  if (status === 'Approved' && required === 'Yes' && Boolean(row['Planned 2'] || row['Actual 2'])) return true;
+  return false;
+};
+
 const buildLiftDataMaps = async (selectedDate = '') => {
   const pageSize = 1000;
   const liftRows = [];
@@ -897,7 +922,7 @@ const buildLiftDataMaps = async (selectedDate = '') => {
     for (let from = 0; ; from += pageSize) {
       const { data, error } = await purchaseSupabase
         .from('LIFT-ACCOUNTS')
-        .select('id, "Lift No", "Firm Name", "Raw Material Name", "Actual Quantity", "Rate", "Transporter Rate", "Lifting Qty", "Type Of Transporting Rate", "Date Of Receiving", "Actual 1"')
+        .select('id, "Lift No", "Firm Name", "Raw Material Name", "Actual Quantity", "Rate", "Transporter Rate", "Lifting Qty", "Total Bags Qty", "Type Of Transporting Rate", "Date Of Receiving", "Actual 1", "Unload Approval Status", "Unload Approval Required", "Planned 2", "Actual 2"')
         .not('Actual 1', 'is', null)
         .not('Actual Quantity', 'is', null)
         .order('Actual 1', { ascending: false })
@@ -935,25 +960,50 @@ const buildLiftDataMaps = async (selectedDate = '') => {
       }
 
       // Product Rate: take the Rate from the LIFT-ACCOUNTS record with the latest Date Of Receiving.
-      const liftMaterialRate = Number(row['Rate']);
-      if (rowDate && Number.isFinite(liftMaterialRate) && (latestReceivingDateMap[key] === undefined || rowDate > latestReceivingDateMap[key])) {
+      // For packaging bag items (BAG_RATE_ITEM_KEYS), the rate is instead computed as
+      // (Billing Qty * Rate) / Total Bag Qty from rows whose Unload Approval is complete.
+      let liftMaterialRate;
+      if (BAG_RATE_ITEM_KEYS.has(itemKey)) {
+        const billingQty = Number(row['Lifting Qty']);
+        const rate = Number(row['Rate']);
+        const totalBagQty = Number(row['Total Bags Qty']);
+        liftMaterialRate = (
+          isUnloadApprovalComplete(row) &&
+          Number.isFinite(billingQty) &&
+          Number.isFinite(rate) &&
+          Number.isFinite(totalBagQty) &&
+          totalBagQty !== 0
+        ) ? (billingQty * rate) / totalBagQty : NaN;
+      } else {
+        liftMaterialRate = Number(row['Rate']);
+      }
+      if (RATE_DIVIDE_BY_1000_ITEM_KEYS.has(itemKey) && Number.isFinite(liftMaterialRate)) {
+        liftMaterialRate = liftMaterialRate / 1000;
+      }
+      if (
+        rowDate &&
+        Number.isFinite(liftMaterialRate) &&
+        (latestReceivingDateMap[key] === undefined || rowDate > latestReceivingDateMap[key])
+      ) {
         latestReceivingDateMap[key] = rowDate;
         poRatesMap[key] = liftMaterialRate;
       }
 
-      // Set the latest Per MT Transportation Rate (Transporter Rate / Lifting Qty,
-      // for both "Per MT" and "Fixed" transporting rate types)
+      // Set the latest Per MT Transportation Rate.
+      // Applicable when Type Of Transporting Rate is "Per MT" or "Fixed":
+      // perMTRate = Transporter Rate / Lifting Qty (rounded to 2 decimals).
       if (transportingRatesMap[key] === undefined) {
         const rateType = String(row['Type Of Transporting Rate'] || '').trim().toLowerCase();
         const transporterRate = Number(row['Transporter Rate']);
         const liftingQty = Number(row['Lifting Qty']);
+
         if (
           (rateType === 'per mt' || rateType === 'fixed') &&
           Number.isFinite(transporterRate) &&
           Number.isFinite(liftingQty) &&
           liftingQty !== 0
         ) {
-          transportingRatesMap[key] = transporterRate / liftingQty;
+          transportingRatesMap[key] = roundTo(transporterRate / liftingQty, 2);
         }
       }
     });
@@ -1243,7 +1293,14 @@ export const apiService = {
       const inventoryRows = mergeDuplicateInventoryRows((data || [])
         .map((item, index) => {
           const key = `${normalizeFirmKey(item.firm_name)}::${normalizeItemKey(item.item_name)}`;
-          const rate = ratesMap[key] !== undefined ? ratesMap[key] : (item.product_rate ?? '');
+          const baseRate = poRatesMap[key] !== undefined ? poRatesMap[key] : (item.product_rate ?? '');
+          const transRate = transportingRatesMap[key] || 0;
+          let rate = baseRate;
+          if (rate !== '') {
+            rate = Number(rate) + transRate;
+          } else if (transRate > 0) {
+            rate = transRate;
+          }
           const opStock = numberOrZero(item.op_stock);
 
           let actualLevel = actualQuantityMap[key] ?? item.actual_level ?? '';
@@ -1281,7 +1338,7 @@ export const apiService = {
             raw_material_sales: -salesRawQty,
             actual_level: actualLevel,
             product_rate: rate,
-            material_rate: poRatesMap[key] !== undefined ? poRatesMap[key] : (rate !== '' ? rate : ''),
+            material_rate: baseRate,
             transportation_rate: transportingRatesMap[key] !== undefined ? transportingRatesMap[key] : 0,
             optimum_stock_total: calculatedOptimumTotal,
             stock_total: calculatedStockTotal,

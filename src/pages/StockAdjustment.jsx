@@ -21,13 +21,11 @@ const defaultFormValues = {
   status: 'Factory +'
 };
 
-const rawProductDefaultValues = {
+const productRateDefaultValues = {
+  materialType: 'raw_material',
   firmName: '',
-  productName: '',
-  unit: 'MT',
-  maxQty: 0,
-  optimumQty: 0,
-  safetyFactor: 1
+  itemName: '',
+  rate: ''
 };
 
 const StockAdjustment = () => {
@@ -43,8 +41,7 @@ const StockAdjustment = () => {
   const [rawEntryFormOpen, setRawEntryFormOpen] = useState(false);
   const [finishEntryFormOpen, setFinishEntryFormOpen] = useState(false);
   const [opStockFormOpen, setOpStockFormOpen] = useState(false);
-  const [rawProductFormOpen, setRawProductFormOpen] = useState(false);
-  const [finishProductFormOpen, setFinishProductFormOpen] = useState(false);
+  const [productRateFormOpen, setProductRateFormOpen] = useState(false);
   const [editingOpStockRow, setEditingOpStockRow] = useState(null);
   const [editingAdjustment, setEditingAdjustment] = useState(null);
   const [opStockMaterialType, setOpStockMaterialType] = useState('finish_good');
@@ -109,22 +106,18 @@ const StockAdjustment = () => {
   } = useForm({ defaultValues: defaultFormValues });
 
   const {
-    register: registerRawProduct,
-    handleSubmit: handleRawProductSubmit,
-    reset: resetRawProduct,
-    formState: { errors: errorsRawProduct }
-  } = useForm({ defaultValues: rawProductDefaultValues });
-
-  const {
-    register: registerFinishProduct,
-    handleSubmit: handleFinishProductSubmit,
-    reset: resetFinishProduct,
-    formState: { errors: errorsFinishProduct }
-  } = useForm({ defaultValues: { firmName: '', productName: '' } });
+    register: registerProductRate,
+    handleSubmit: handleProductRateSubmit,
+    reset: resetProductRate,
+    watch: watchProductRate,
+    formState: { errors: errorsProductRate }
+  } = useForm({ defaultValues: productRateDefaultValues });
 
   const selectedRawFirm = watchRaw('firmName');
   const selectedFinishFirm = watchFinish('firmName');
   const selectedOpStockFirm = watchOpStock('firmName');
+  const selectedProductRateFirm = watchProductRate('firmName');
+  const selectedProductRateType = watchProductRate('materialType');
 
   useEffect(() => {
     if (!user) return;
@@ -246,6 +239,15 @@ const StockAdjustment = () => {
       .filter((itemName, index, items) => items.indexOf(itemName) === index)
       .sort((a, b) => a.localeCompare(b)),
     [finishItemOptions, opStockMaterialType, rawItemOptions, selectedOpStockFirm]
+  );
+
+  const filteredProductRateItemOptions = useMemo(
+    () => (selectedProductRateType === 'raw_material' ? rawItemOptions : finishItemOptions)
+      .filter(item => !selectedProductRateFirm || item.firm_name === selectedProductRateFirm)
+      .map(item => selectedProductRateType === 'raw_material' ? item.item_name : item.product_name)
+      .filter((itemName, index, items) => items.indexOf(itemName) === index)
+      .sort((a, b) => a.localeCompare(b)),
+    [finishItemOptions, rawItemOptions, selectedProductRateFirm, selectedProductRateType]
   );
 
   const savedOpStockRows = useMemo(() => [
@@ -388,62 +390,32 @@ const StockAdjustment = () => {
     }
   };
 
-  const onRawProductSubmit = async (data) => {
+  const onProductRateSubmit = async (data) => {
     try {
       const { error } = await supabase
-        .from('inventory_master')
+        .from('stock_adjustment')
         .insert([{
+          entry_date: new Date().toISOString().split('T')[0],
           firm_name: data.firmName,
-          item_name: data.productName.trim(),
-          unit: data.unit?.trim() || 'MT',
-          max_qty: Number(data.maxQty),
-          optimum_qty: Number(data.optimumQty),
-          safety_factor: Number(data.safetyFactor)
+          item_name: data.itemName,
+          material_type: data.materialType,
+          rate: Number(data.rate)
         }]);
 
       if (error) throw error;
 
-      showSuccess('Raw material added successfully.');
-      await fetchRawMaterialItems();
-      resetRawProduct({ ...rawProductDefaultValues, firmName: defaultFirmName });
-      setRawProductFormOpen(false);
+      showSuccess('Product rate saved successfully.');
+      fetchStockAdjustments();
+      resetProductRate({ ...productRateDefaultValues, firmName: defaultFirmName });
+      setProductRateFormOpen(false);
     } catch (e) {
-      showError(e.code === '23505'
-        ? 'This raw material already exists for the selected firm.'
-        : e.message || 'Failed to add raw material.');
+      showError(e.message || 'Failed to save product rate.');
     }
   };
 
-  const onFinishProductSubmit = async (data) => {
-    try {
-      const { error } = await supabase
-        .from('finished_goods_inventory_master')
-        .insert([{
-          firm_name: data.firmName,
-          product_name: data.productName.trim()
-        }]);
-
-      if (error) throw error;
-
-      showSuccess('Finished good added successfully.');
-      await fetchFinishGoodItems();
-      resetFinishProduct({ firmName: defaultFirmName, productName: '' });
-      setFinishProductFormOpen(false);
-    } catch (e) {
-      showError(e.code === '23505'
-        ? 'This finished good already exists for the selected firm.'
-        : e.message || 'Failed to add finished good.');
-    }
-  };
-
-  const openRawProductForm = () => {
-    resetRawProduct({ ...rawProductDefaultValues, firmName: defaultFirmName });
-    setRawProductFormOpen(true);
-  };
-
-  const openFinishProductForm = () => {
-    resetFinishProduct({ firmName: defaultFirmName, productName: '' });
-    setFinishProductFormOpen(true);
+  const openProductRateForm = () => {
+    resetProductRate({ ...productRateDefaultValues, firmName: defaultFirmName });
+    setProductRateFormOpen(true);
   };
 
   const openNewOpStockForm = (materialType) => {
@@ -787,21 +759,24 @@ const StockAdjustment = () => {
     </form>
   );
 
-  const renderProductForm = ({
-    errors,
-    handleSubmit,
-    includeUnit = false,
-    onSubmit,
-    register,
-    setOpen,
-    submitLabel
-  }) => (
-    <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+  const renderProductRateForm = () => (
+    <form onSubmit={handleProductRateSubmit(onProductRateSubmit)} className="space-y-4">
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="space-y-1">
+          <label className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider pl-0.5">Type</label>
+          <select
+            {...registerProductRate('materialType', { required: true })}
+            className="w-full px-3 py-2.5 text-xs rounded-lg glass-input bg-slate-900"
+          >
+            <option value="raw_material">Raw Material</option>
+            <option value="finish_good">Finished Good</option>
+          </select>
+        </div>
+
         <div className="space-y-1">
           <label className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider pl-0.5">Firm Name</label>
           <select
-            {...register('firmName', { required: 'Firm name is required' })}
+            {...registerProductRate('firmName', { required: 'Firm name is required' })}
             className="w-full px-3 py-2.5 text-xs rounded-lg glass-input bg-slate-900"
           >
             <option value="">Select firm...</option>
@@ -809,88 +784,43 @@ const StockAdjustment = () => {
               <option key={firmName} value={firmName}>{firmName}</option>
             ))}
           </select>
-          {errors.firmName && <span className="text-[10px] text-rose-400 font-medium">{errors.firmName.message}</span>}
+          {errorsProductRate.firmName && <span className="text-[10px] text-rose-400 font-medium">{errorsProductRate.firmName.message}</span>}
         </div>
 
         <div className="space-y-1">
-          <label className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider pl-0.5">
-            {includeUnit ? 'Raw Material Name' : 'Finished Good Name'}
-          </label>
+          <label className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider pl-0.5">Item / Product Name</label>
+          <select
+            {...registerProductRate('itemName', { required: 'Item / Product name is required' })}
+            className="w-full px-3 py-2.5 text-xs rounded-lg glass-input bg-slate-900"
+          >
+            <option value="">Select item...</option>
+            {filteredProductRateItemOptions.map(itemName => (
+              <option key={itemName} value={itemName}>{itemName}</option>
+            ))}
+          </select>
+          {errorsProductRate.itemName && <span className="text-[10px] text-rose-400 font-medium">{errorsProductRate.itemName.message}</span>}
+        </div>
+
+        <div className="space-y-1">
+          <label className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider pl-0.5">Product Rate</label>
           <input
-            type="text"
-            placeholder={includeUnit ? 'Enter raw material name' : 'Enter finished good name'}
-            {...register('productName', {
-              required: 'Name is required',
-              validate: value => value.trim().length > 0 || 'Name is required'
+            type="number"
+            step="any"
+            placeholder="0"
+            {...registerProductRate('rate', {
+              required: 'Product rate is required',
+              min: { value: 0.000001, message: 'Product rate must be greater than 0' }
             })}
             className="w-full px-3 py-2.5 text-xs rounded-lg glass-input"
           />
-          {errors.productName && <span className="text-[10px] text-rose-400 font-medium">{errors.productName.message}</span>}
+          {errorsProductRate.rate && <span className="text-[10px] text-rose-400 font-medium">{errorsProductRate.rate.message}</span>}
         </div>
-
-        {includeUnit && (
-          <>
-            <div className="space-y-1">
-              <label className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider pl-0.5">Unit</label>
-              <input
-                type="text"
-                placeholder="e.g. MT, KG"
-                {...register('unit', { required: 'Unit is required' })}
-                className="w-full px-3 py-2.5 text-xs rounded-lg glass-input"
-              />
-              {errors.unit && <span className="text-[10px] text-rose-400 font-medium">{errors.unit.message}</span>}
-            </div>
-
-            <div className="space-y-1">
-              <label className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider pl-0.5">Max Quantity</label>
-              <input
-                type="number"
-                step="any"
-                {...register('maxQty', {
-                  required: 'Max quantity is required',
-                  min: { value: 0, message: 'Max quantity cannot be negative' }
-                })}
-                className="w-full px-3 py-2.5 text-xs rounded-lg glass-input"
-              />
-              {errors.maxQty && <span className="text-[10px] text-rose-400 font-medium">{errors.maxQty.message}</span>}
-            </div>
-
-            <div className="space-y-1">
-              <label className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider pl-0.5">Optimum Quantity</label>
-              <input
-                type="number"
-                step="any"
-                {...register('optimumQty', {
-                  required: 'Optimum quantity is required',
-                  min: { value: 0, message: 'Optimum quantity cannot be negative' }
-                })}
-                className="w-full px-3 py-2.5 text-xs rounded-lg glass-input"
-              />
-              {errors.optimumQty && <span className="text-[10px] text-rose-400 font-medium">{errors.optimumQty.message}</span>}
-            </div>
-
-            <div className="space-y-1">
-              <label className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider pl-0.5">Safety Factor</label>
-              <input
-                type="number"
-                step="any"
-                {...register('safetyFactor', {
-                  required: 'Safety factor is required',
-                  min: { value: 0, message: 'Safety factor cannot be negative' }
-                })}
-                className="w-full px-3 py-2.5 text-xs rounded-lg glass-input"
-              />
-              {errors.safetyFactor && <span className="text-[10px] text-rose-400 font-medium">{errors.safetyFactor.message}</span>}
-            </div>
-
-          </>
-        )}
       </div>
 
       <div className="pt-3 border-t border-slate-800 flex justify-end gap-3 text-xs">
         <button
           type="button"
-          onClick={() => setOpen(false)}
+          onClick={() => setProductRateFormOpen(false)}
           className="px-4 py-2.5 rounded-lg bg-slate-800 text-slate-400 hover:text-slate-200 cursor-pointer"
         >
           Cancel
@@ -899,7 +829,7 @@ const StockAdjustment = () => {
           type="submit"
           className="px-4 py-2.5 rounded-lg bg-indigo-600 text-white font-semibold hover:bg-indigo-500 cursor-pointer"
         >
-          {submitLabel}
+          Add Product Rate
         </button>
       </div>
     </form>
@@ -960,18 +890,11 @@ const StockAdjustment = () => {
         ) : (
           <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
             <button
-              onClick={openRawProductForm}
+              onClick={openProductRateForm}
               className="flex items-center justify-center gap-1.5 px-3.5 py-2 text-xs rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-semibold shadow-md transition-colors cursor-pointer"
             >
               <Plus className="w-4.5 h-4.5" />
-              <span>Add Raw Material</span>
-            </button>
-            <button
-              onClick={openFinishProductForm}
-              className="flex items-center justify-center gap-1.5 px-3.5 py-2 text-xs rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-semibold shadow-md transition-colors cursor-pointer"
-            >
-              <PackagePlus className="w-4.5 h-4.5" />
-              <span>Add Finished Good</span>
+              <span>Add Product Rate</span>
             </button>
           </div>
         )}
@@ -1102,34 +1025,11 @@ const StockAdjustment = () => {
       </Modal>
 
       <Modal
-        isOpen={rawProductFormOpen}
-        onClose={() => setRawProductFormOpen(false)}
-        title="Add Raw Material"
+        isOpen={productRateFormOpen}
+        onClose={() => setProductRateFormOpen(false)}
+        title="Add Product Rate"
       >
-        {renderProductForm({
-          errors: errorsRawProduct,
-          handleSubmit: handleRawProductSubmit,
-          includeUnit: true,
-          onSubmit: onRawProductSubmit,
-          register: registerRawProduct,
-          setOpen: setRawProductFormOpen,
-          submitLabel: 'Add Raw Material'
-        })}
-      </Modal>
-
-      <Modal
-        isOpen={finishProductFormOpen}
-        onClose={() => setFinishProductFormOpen(false)}
-        title="Add Finished Good"
-      >
-        {renderProductForm({
-          errors: errorsFinishProduct,
-          handleSubmit: handleFinishProductSubmit,
-          onSubmit: onFinishProductSubmit,
-          register: registerFinishProduct,
-          setOpen: setFinishProductFormOpen,
-          submitLabel: 'Add Finished Good'
-        })}
+        {renderProductRateForm()}
       </Modal>
 
       <Modal
