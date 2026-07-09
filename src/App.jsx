@@ -2,7 +2,7 @@ import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './hooks/useAuth';
 import { ToastProvider } from './components/Toast';
-import Sidebar from './components/Sidebar';
+import TopNav from './components/TopNav';
 import Header from './components/Header';
 
 // Pages
@@ -39,11 +39,13 @@ const ProtectedRoute = ({ children }) => {
 // Layout for Authenticated Pages
 const AppLayout = () => {
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-(--surface-soft) transition-colors duration-200">
-      <Sidebar />
-      <div className="flex-1 flex flex-col overflow-hidden">
-        <Header />
-        <main className="main-content-area flex-1 overflow-y-auto px-4 py-6 sm:px-8 sm:py-8 scroll-smooth">
+    <div className="app-shell flex flex-col h-screen w-screen overflow-hidden transition-colors duration-200">
+      <div className="flex-1 flex flex-col overflow-y-auto scroll-smooth">
+        <div className="flex flex-col gap-4 px-4 pt-4 sm:px-6 sm:pt-6 shrink-0">
+          <Header />
+          <TopNav />
+        </div>
+        <main className="main-content-area flex-1 px-4 py-6 sm:px-6 sm:py-6 scroll-smooth">
           <Routes>
             <Route path="/" element={<Dashboard />} />
             <Route path="/inventory" element={<BranchInventory />} />

@@ -906,7 +906,7 @@ const StockAdjustment = () => {
   );
 
   return (
-    <div className="space-y-6 max-w-7xl mx-auto p-1.5 animate-slide-up">
+    <div className="space-y-6 w-full p-1.5 animate-slide-up">
       <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
         <div>
           <h2 className="text-xl font-bold text-slate-100 flex items-center gap-2">

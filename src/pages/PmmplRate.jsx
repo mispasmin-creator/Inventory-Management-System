@@ -79,7 +79,7 @@ const PmmplRate = () => {
   const isEditable = user?.role !== 'Viewer';
 
   return (
-    <div className="space-y-6 max-w-7xl mx-auto p-1.5 animate-slide-up">
+    <div className="space-y-6 w-full p-1.5 animate-slide-up">
       
       {/* Title */}
       <div>
@@ -221,18 +221,18 @@ const PmmplRate = () => {
                   <Clock className="w-3.5 h-3.5" /> Rate Timeline History
                 </h4>
                 <div className="max-h-[160px] overflow-y-auto rounded-lg border border-slate-800 bg-slate-950/20 text-xs">
-                  <table className="w-full text-left border-collapse">
+                  <table className="w-full text-center border-collapse">
                     <thead className="bg-slate-900 text-slate-400 text-[10px] sticky top-0 z-10">
                       <tr>
                         <th className="p-2 sticky top-0 bg-slate-900 z-10">Date</th>
-                        <th className="p-2 text-right sticky top-0 bg-slate-900 z-10">Price per Ton</th>
+                        <th className="p-2 sticky top-0 bg-slate-900 z-10">Price per Ton</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-800 text-slate-300">
                       {[...(selectedRate.history || [])].reverse().map((h, i) => (
                         <tr key={i}>
                           <td className="p-2 font-mono">{h.date}</td>
-                          <td className="p-2 text-right font-bold text-slate-200">₹{h.rate}</td>
+                          <td className="p-2 font-bold text-slate-200">₹{h.rate}</td>
                         </tr>
                       ))}
                     </tbody>

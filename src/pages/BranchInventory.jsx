@@ -77,10 +77,10 @@ const BranchInventory = () => {
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [transferModalOpen, setTransferModalOpen] = useState(false);
   const [selectedItem, setSelectedItem] = useState(null);
-  const [detailsModalOpen, setDetailsModalOpen] = useState(false);
-  const [detailsItem, setDetailsItem] = useState(null);
   const [prodBreakdownModalOpen, setProdBreakdownModalOpen] = useState(false);
   const [prodBreakdownItem, setProdBreakdownItem] = useState(null);
+  const [rateBreakdownModalOpen, setRateBreakdownModalOpen] = useState(false);
+  const [rateBreakdownItem, setRateBreakdownItem] = useState(null);
   
   // Transfers logs
   const [transferRequests, setTransferRequests] = useState([]);
@@ -458,22 +458,48 @@ const BranchInventory = () => {
   const rawMaterialColumns = [
     { header: 'S. No.', accessor: 's_no', render: (row) => row.s_no ?? '' },
     { header: 'Firm Name', accessor: 'firm_name' },
-    { 
-      header: 'Item Name', 
-      accessor: 'item_name',
-      render: (row) => (
-        <button
-          onClick={() => {
-            setDetailsItem(row);
-            setDetailsModalOpen(true);
-          }}
-          className="text-indigo-400 hover:text-indigo-300 font-semibold cursor-pointer text-left focus:outline-none"
-        >
-          {row.item_name}
-        </button>
-      )
-    },
+    { header: 'Item Name', accessor: 'item_name' },
     { header: 'Unit', accessor: 'unit' },
+    {
+      header: 'Annual Con',
+      accessor: 'annu_con',
+      render: (row) => row.annu_con !== null && row.annu_con !== undefined && row.annu_con !== ''
+        ? `${Number(row.annu_con).toLocaleString()} ${row.unit || ''}`.trim()
+        : '-'
+    },
+    {
+      header: 'Daily Con',
+      accessor: 'd_con',
+      render: (row) => row.d_con !== null && row.d_con !== undefined && row.d_con !== ''
+        ? `${Number(row.d_con).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 3 })} ${row.unit || ''}`.trim()
+        : '-'
+    },
+    {
+      header: 'S.F',
+      accessor: 'sf',
+      render: (row) => row.sf !== null && row.sf !== undefined && row.sf !== '' ? Number(row.sf).toLocaleString() : '-'
+    },
+    {
+      header: 'Lead Time',
+      accessor: 'lead_time',
+      render: (row) => row.lead_time !== null && row.lead_time !== undefined && row.lead_time !== ''
+        ? `${Number(row.lead_time).toLocaleString()} days`
+        : '-'
+    },
+    {
+      header: 'Max Stock',
+      accessor: 'max_stock',
+      render: (row) => row.max_stock !== null && row.max_stock !== undefined && row.max_stock !== ''
+        ? `${Number(row.max_stock).toLocaleString()} ${row.unit || ''}`.trim()
+        : '-'
+    },
+    {
+      header: 'Optimum Stock',
+      accessor: 'optimum_stock',
+      render: (row) => row.optimum_stock !== null && row.optimum_stock !== undefined && row.optimum_stock !== ''
+        ? `${Number(row.optimum_stock).toLocaleString()} ${row.unit || ''}`.trim()
+        : '-'
+    },
     { header: 'OP. Stock', accessor: 'op_stock', render: (row) => renderRawNumber(row.op_stock) },
     { header: 'Stock Adjustment', accessor: 'stock_adjustment', render: (row) => renderRawNumber(row.stock_adjustment) },
     { 
@@ -522,7 +548,22 @@ const BranchInventory = () => {
       },
       render: (row) => row.actual_level !== null && row.actual_level !== undefined && row.actual_level !== '' ? Number(row.actual_level).toLocaleString() : ''
     },
-    { header: 'Product Rate', accessor: 'product_rate', render: (row) => renderRawCurrency(row.product_rate) },
+    {
+      header: 'Product Rate',
+      accessor: 'product_rate',
+      render: (row) => (
+        <button
+          onClick={() => {
+            setRateBreakdownItem(row);
+            setRateBreakdownModalOpen(true);
+          }}
+          className="text-indigo-400 hover:text-indigo-300 font-semibold cursor-pointer focus:outline-none"
+          title="Click to see rate breakdown"
+        >
+          {renderRawCurrency(row.product_rate)}
+        </button>
+      )
+    },
     { header: 'Optimum Stock Total', accessor: 'optimum_stock_total', render: (row) => renderRawCurrency(row.optimum_stock_total) },
     { header: 'Stock Total', accessor: 'stock_total', render: (row) => renderRawCurrency(row.stock_total) },
     { 
@@ -813,7 +854,7 @@ const BranchInventory = () => {
   ];
 
   return (
-    <div className="space-y-6 max-w-7xl mx-auto p-1.5 animate-slide-up">
+    <div className="space-y-6 w-full p-1.5 animate-slide-up">
       
       {/* Title block with Firm actions */}
       <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
@@ -902,6 +943,12 @@ const BranchInventory = () => {
               data={displayedInventoryItems}
               searchPlaceholder="Search materials by name..."
               exportFileName={`${activeBranch}_${type}_inventory`}
+              legend={!isFinishGood ? [
+                { label: 'Excess Stock (>100%)', color: '#a855f7' },
+                { label: 'Normal Stock (66-100%)', color: '#16a34a' },
+                { label: 'Medium Stock (33-66%)', color: '#f59e0b' },
+                { label: 'Low Stock (<33%)', color: '#ef4444' },
+              ] : null}
               serverSide={true}
               serverTotalItems={totalCount}
               serverCurrentPage={currentPage}
@@ -1358,83 +1405,53 @@ const BranchInventory = () => {
         </form>
       </Modal>
 
-      {/* MODAL: MATERIAL DETAILS */}
+      {/* MODAL: PRODUCT RATE BREAKDOWN */}
       <Modal
-        isOpen={detailsModalOpen}
+        isOpen={rateBreakdownModalOpen}
         onClose={() => {
-          setDetailsModalOpen(false);
-          setDetailsItem(null);
+          setRateBreakdownModalOpen(false);
+          setRateBreakdownItem(null);
         }}
-        title={`Material Details: ${detailsItem?.item_name || ''}`}
+        title={`Product Rate Breakdown: ${rateBreakdownItem?.item_name || ''}`}
       >
         <div className="space-y-4 text-slate-300">
           <div className="grid grid-cols-2 gap-4 border-b border-slate-800 pb-4">
             <div>
               <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Item Name</div>
-              <div className="text-sm font-bold text-slate-100 mt-0.5">{detailsItem?.item_name || '-'}</div>
+              <div className="text-sm font-bold text-slate-100 mt-0.5">{rateBreakdownItem?.item_name || '-'}</div>
             </div>
             <div>
               <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Firm Name</div>
-              <div className="text-sm font-bold text-slate-100 mt-0.5">{detailsItem?.firm_name || '-'}</div>
+              <div className="text-sm font-bold text-slate-100 mt-0.5">{rateBreakdownItem?.firm_name || '-'}</div>
             </div>
           </div>
-          
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-y-4 gap-x-6 py-2">
+
+          <div className="grid grid-cols-2 gap-y-4 gap-x-6 py-2">
             <div>
-              <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Annual Consumption</div>
-              <div className="text-xs font-semibold text-slate-200 mt-1">
-                {detailsItem?.annu_con !== null && detailsItem?.annu_con !== undefined && detailsItem?.annu_con !== '' 
-                  ? Number(detailsItem.annu_con).toLocaleString() 
-                  : '-'} {detailsItem?.unit || ''}
+              <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Product Rate</div>
+              <div className="text-sm font-bold text-slate-100 mt-1">
+                {renderRawCurrency(rateBreakdownItem?.material_rate)}
               </div>
             </div>
             <div>
-              <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Daily Consumption</div>
-              <div className="text-xs font-semibold text-slate-200 mt-1">
-                {detailsItem?.d_con !== null && detailsItem?.d_con !== undefined && detailsItem?.d_con !== '' 
-                  ? Number(detailsItem.d_con).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 3 }) 
-                  : '-'} {detailsItem?.unit || ''}
-              </div>
-            </div>
-            <div>
-              <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Safety Factor (S.F)</div>
-              <div className="text-xs font-semibold text-slate-200 mt-1">
-                {detailsItem?.sf !== null && detailsItem?.sf !== undefined && detailsItem?.sf !== '' 
-                  ? Number(detailsItem.sf).toLocaleString() 
-                  : '-'}
-              </div>
-            </div>
-            <div>
-              <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Lead Time</div>
-              <div className="text-xs font-semibold text-slate-200 mt-1">
-                {detailsItem?.lead_time !== null && detailsItem?.lead_time !== undefined && detailsItem?.lead_time !== '' 
-                  ? `${Number(detailsItem.lead_time).toLocaleString()} days` 
-                  : '-'}
-              </div>
-            </div>
-            <div>
-              <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Max Stock</div>
-              <div className="text-xs font-semibold text-slate-200 mt-1">
-                {detailsItem?.max_stock !== null && detailsItem?.max_stock !== undefined && detailsItem?.max_stock !== '' 
-                  ? Number(detailsItem.max_stock).toLocaleString() 
-                  : '-'} {detailsItem?.unit || ''}
-              </div>
-            </div>
-            <div>
-              <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Optimum Stock</div>
-              <div className="text-xs font-semibold text-slate-200 mt-1">
-                {detailsItem?.optimum_stock !== null && detailsItem?.optimum_stock !== undefined && detailsItem?.optimum_stock !== '' 
-                  ? Number(detailsItem.optimum_stock).toLocaleString() 
-                  : '-'} {detailsItem?.unit || ''}
+              <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Per MT Transportation Rate</div>
+              <div className="text-sm font-bold text-slate-100 mt-1">
+                {renderRawCurrency(rateBreakdownItem?.transportation_rate)}
               </div>
             </div>
           </div>
 
-          <div className="pt-4 border-t border-slate-800 flex justify-end text-xs">
+          <div className="pt-4 border-t border-slate-800 flex items-center justify-between">
+            <div>
+              <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Total Product Rate</div>
+              <div className="text-lg font-black text-emerald-400 mt-1">
+                {renderRawCurrency(rateBreakdownItem?.product_rate)}
+              </div>
+            </div>
             <button
               onClick={() => {
-                setDetailsModalOpen(false);
-                setDetailsItem(null);
+                setRateBreakdownModalOpen(false);
+                setRateBreakdownItem(null);
               }}
               className="px-4 py-2.5 rounded-lg bg-indigo-600 text-white font-semibold hover:bg-indigo-500 cursor-pointer"
             >
@@ -1476,17 +1493,17 @@ const BranchInventory = () => {
 
           {/* Column-wise table — styled like Table.jsx with green theme */}
           <div className="overflow-x-auto rounded-xl border border-slate-800 bg-slate-900/30 backdrop-blur-md">
-            <table className="w-full border-collapse text-left text-xs text-slate-300 min-w-[480px]">
+            <table className="w-full border-collapse text-center text-xs text-slate-300 min-w-[480px]">
               <thead className="bg-slate-900 uppercase tracking-wider text-slate-400 border-b border-slate-800 sticky top-0 z-10">
                 <tr>
                   <th className="px-4 py-2.5 font-semibold text-slate-400 w-[38%]">Category</th>
-                  <th className="px-4 py-2.5 font-semibold text-emerald-400 text-right">
+                  <th className="px-4 py-2.5 font-semibold text-emerald-400">
                     Production
                   </th>
-                  <th className="px-4 py-2.5 font-semibold text-emerald-400 text-right">
+                  <th className="px-4 py-2.5 font-semibold text-emerald-400">
                     Semi Finished
                   </th>
-                  <th className="px-4 py-2.5 font-semibold text-emerald-400 text-right">
+                  <th className="px-4 py-2.5 font-semibold text-emerald-400">
                     Crushing
                   </th>
                 </tr>
@@ -1504,11 +1521,11 @@ const BranchInventory = () => {
                   return (
                     <tr className="hover:bg-slate-800/10 transition-colors duration-150">
                       <td className="px-4 py-2 text-slate-400 font-medium whitespace-nowrap">Raw Material Consumed (−)</td>
-                      <td className={`px-4 py-2 text-right font-semibold whitespace-nowrap ${prodVal < 0 ? 'text-rose-400' : prodVal > 0 ? 'text-emerald-400' : 'text-slate-600'}`}>
+                      <td className={`px-4 py-2 font-semibold whitespace-nowrap ${prodVal < 0 ? 'text-rose-400' : prodVal > 0 ? 'text-emerald-400' : 'text-slate-600'}`}>
                         {prodVal !== 0 ? prodVal.toLocaleString(undefined, { maximumFractionDigits: 3 }) : '—'}
                       </td>
-                      <td className="px-4 py-2 text-right text-slate-600 whitespace-nowrap">—</td>
-                      <td className="px-4 py-2 text-right text-slate-600 whitespace-nowrap">—</td>
+                      <td className="px-4 py-2 text-slate-600 whitespace-nowrap">—</td>
+                      <td className="px-4 py-2 text-slate-600 whitespace-nowrap">—</td>
                     </tr>
                   );
                 })()}
@@ -1516,13 +1533,13 @@ const BranchInventory = () => {
                 {/* Row 2: Fines Output */}
                 <tr className="hover:bg-slate-800/10 transition-colors duration-150">
                   <td className="px-4 py-2 text-slate-400 font-medium whitespace-nowrap">Fines Output (+)</td>
-                  <td className="px-4 py-2 text-right text-slate-600 whitespace-nowrap">—</td>
-                  <td className={`px-4 py-2 text-right font-semibold whitespace-nowrap ${Number(prodBreakdownItem?.semi_fines || 0) > 0 ? 'text-emerald-400' : Number(prodBreakdownItem?.semi_fines || 0) < 0 ? 'text-rose-400' : 'text-slate-600'}`}>
+                  <td className="px-4 py-2 text-slate-600 whitespace-nowrap">—</td>
+                  <td className={`px-4 py-2 font-semibold whitespace-nowrap ${Number(prodBreakdownItem?.semi_fines || 0) > 0 ? 'text-emerald-400' : Number(prodBreakdownItem?.semi_fines || 0) < 0 ? 'text-rose-400' : 'text-slate-600'}`}>
                     {Number(prodBreakdownItem?.semi_fines || 0) !== 0
                       ? Number(prodBreakdownItem.semi_fines).toLocaleString(undefined, { maximumFractionDigits: 3 })
                       : '—'}
                   </td>
-                  <td className={`px-4 py-2 text-right font-semibold whitespace-nowrap ${Number(prodBreakdownItem?.crushing_fines || 0) > 0 ? 'text-emerald-400' : Number(prodBreakdownItem?.crushing_fines || 0) < 0 ? 'text-rose-400' : 'text-slate-600'}`}>
+                  <td className={`px-4 py-2 font-semibold whitespace-nowrap ${Number(prodBreakdownItem?.crushing_fines || 0) > 0 ? 'text-emerald-400' : Number(prodBreakdownItem?.crushing_fines || 0) < 0 ? 'text-rose-400' : 'text-slate-600'}`}>
                     {Number(prodBreakdownItem?.crushing_fines || 0) !== 0
                       ? Number(prodBreakdownItem.crushing_fines).toLocaleString(undefined, { maximumFractionDigits: 3 })
                       : '—'}
@@ -1532,13 +1549,13 @@ const BranchInventory = () => {
                 {/* Row 3: Grains Output */}
                 <tr className="hover:bg-slate-800/10 transition-colors duration-150">
                   <td className="px-4 py-2 text-slate-400 font-medium whitespace-nowrap">Grains Output</td>
-                  <td className="px-4 py-2 text-right text-slate-600 whitespace-nowrap">—</td>
-                  <td className={`px-4 py-2 text-right font-semibold whitespace-nowrap ${Number(prodBreakdownItem?.semi_grains || 0) > 0 ? 'text-emerald-400' : Number(prodBreakdownItem?.semi_grains || 0) < 0 ? 'text-rose-400' : 'text-slate-600'}`}>
+                  <td className="px-4 py-2 text-slate-600 whitespace-nowrap">—</td>
+                  <td className={`px-4 py-2 font-semibold whitespace-nowrap ${Number(prodBreakdownItem?.semi_grains || 0) > 0 ? 'text-emerald-400' : Number(prodBreakdownItem?.semi_grains || 0) < 0 ? 'text-rose-400' : 'text-slate-600'}`}>
                     {Number(prodBreakdownItem?.semi_grains || 0) !== 0
                       ? Number(prodBreakdownItem.semi_grains).toLocaleString(undefined, { maximumFractionDigits: 3 })
                       : '—'}
                   </td>
-                  <td className={`px-4 py-2 text-right font-semibold whitespace-nowrap ${Number(prodBreakdownItem?.crushing_grains || 0) > 0 ? 'text-emerald-400' : Number(prodBreakdownItem?.crushing_grains || 0) < 0 ? 'text-rose-400' : 'text-slate-600'}`}>
+                  <td className={`px-4 py-2 font-semibold whitespace-nowrap ${Number(prodBreakdownItem?.crushing_grains || 0) > 0 ? 'text-emerald-400' : Number(prodBreakdownItem?.crushing_grains || 0) < 0 ? 'text-rose-400' : 'text-slate-600'}`}>
                     {Number(prodBreakdownItem?.crushing_grains || 0) !== 0
                       ? Number(prodBreakdownItem.crushing_grains).toLocaleString(undefined, { maximumFractionDigits: 3 })
                       : '—'}
@@ -1548,9 +1565,9 @@ const BranchInventory = () => {
                 {/* Row 4: Lumps / Fired */}
                 <tr className="hover:bg-slate-800/10 transition-colors duration-150">
                   <td className="px-4 py-2 text-slate-400 font-medium whitespace-nowrap">Lumps / Fired Input (−)</td>
-                  <td className="px-4 py-2 text-right text-slate-600 whitespace-nowrap">—</td>
-                  <td className="px-4 py-2 text-right text-slate-600 whitespace-nowrap">—</td>
-                  <td className={`px-4 py-2 text-right font-semibold whitespace-nowrap ${Number(prodBreakdownItem?.crushing_lumps || 0) > 0 ? 'text-emerald-400' : Number(prodBreakdownItem?.crushing_lumps || 0) < 0 ? 'text-rose-400' : 'text-slate-600'}`}>
+                  <td className="px-4 py-2 text-slate-600 whitespace-nowrap">—</td>
+                  <td className="px-4 py-2 text-slate-600 whitespace-nowrap">—</td>
+                  <td className={`px-4 py-2 font-semibold whitespace-nowrap ${Number(prodBreakdownItem?.crushing_lumps || 0) > 0 ? 'text-emerald-400' : Number(prodBreakdownItem?.crushing_lumps || 0) < 0 ? 'text-rose-400' : 'text-slate-600'}`}>
                     {Number(prodBreakdownItem?.crushing_lumps || 0) !== 0
                       ? Number(prodBreakdownItem.crushing_lumps).toLocaleString(undefined, { maximumFractionDigits: 3 })
                       : '—'}
@@ -1560,9 +1577,9 @@ const BranchInventory = () => {
                 {/* Row 5: Finished Goods Output */}
                 <tr className="hover:bg-slate-800/10 transition-colors duration-150">
                   <td className="px-4 py-2 text-slate-400 font-medium whitespace-nowrap">Crushing Grains (+)</td>
-                  <td className="px-4 py-2 text-right text-slate-600 whitespace-nowrap">—</td>
-                  <td className="px-4 py-2 text-right text-slate-600 whitespace-nowrap">—</td>
-                  <td className={`px-4 py-2 text-right font-semibold whitespace-nowrap ${Number(prodBreakdownItem?.crushing_outputs || 0) > 0 ? 'text-emerald-400' : Number(prodBreakdownItem?.crushing_outputs || 0) < 0 ? 'text-rose-400' : 'text-slate-600'}`}>
+                  <td className="px-4 py-2 text-slate-600 whitespace-nowrap">—</td>
+                  <td className="px-4 py-2 text-slate-600 whitespace-nowrap">—</td>
+                  <td className={`px-4 py-2 font-semibold whitespace-nowrap ${Number(prodBreakdownItem?.crushing_outputs || 0) > 0 ? 'text-emerald-400' : Number(prodBreakdownItem?.crushing_outputs || 0) < 0 ? 'text-rose-400' : 'text-slate-600'}`}>
                     {Number(prodBreakdownItem?.crushing_outputs || 0) !== 0
                       ? Number(prodBreakdownItem.crushing_outputs).toLocaleString(undefined, { maximumFractionDigits: 3 })
                       : '—'}
@@ -1582,13 +1599,13 @@ const BranchInventory = () => {
                   return (
                     <tr className="border-t-2 border-emerald-800/60 bg-emerald-950/20">
                       <td className="px-4 py-3 font-bold text-emerald-300 uppercase tracking-wider text-[11px] whitespace-nowrap">Column Total</td>
-                      <td className={`px-4 py-3 text-right font-black text-sm whitespace-nowrap ${prodVal < 0 ? 'text-rose-400' : prodVal > 0 ? 'text-emerald-400' : 'text-slate-500'}`}>
+                      <td className={`px-4 py-3 font-black text-sm whitespace-nowrap ${prodVal < 0 ? 'text-rose-400' : prodVal > 0 ? 'text-emerald-400' : 'text-slate-500'}`}>
                         {prodVal !== 0 ? prodVal.toLocaleString(undefined, { maximumFractionDigits: 3 }) : '—'}
                       </td>
-                      <td className={`px-4 py-3 text-right font-black text-sm whitespace-nowrap ${semiVal < 0 ? 'text-rose-400' : semiVal > 0 ? 'text-emerald-400' : 'text-slate-500'}`}>
+                      <td className={`px-4 py-3 font-black text-sm whitespace-nowrap ${semiVal < 0 ? 'text-rose-400' : semiVal > 0 ? 'text-emerald-400' : 'text-slate-500'}`}>
                         {semiVal !== 0 ? (semiVal > 0 ? '+' : '') + semiVal.toLocaleString(undefined, { maximumFractionDigits: 3 }) : '—'}
                       </td>
-                      <td className={`px-4 py-3 text-right font-black text-sm whitespace-nowrap ${crushVal < 0 ? 'text-rose-400' : crushVal > 0 ? 'text-emerald-400' : 'text-slate-500'}`}>
+                      <td className={`px-4 py-3 font-black text-sm whitespace-nowrap ${crushVal < 0 ? 'text-rose-400' : crushVal > 0 ? 'text-emerald-400' : 'text-slate-500'}`}>
                         {crushVal !== 0 ? (crushVal > 0 ? '+' : '') + crushVal.toLocaleString(undefined, { maximumFractionDigits: 3 }) : '—'}
                       </td>
                     </tr>

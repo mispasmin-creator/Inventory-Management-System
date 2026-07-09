@@ -494,7 +494,7 @@ const Settings = () => {
   );
 
   return (
-    <div className="space-y-6 max-w-7xl mx-auto p-1.5 animate-slide-up pb-12">
+    <div className="space-y-6 w-full p-1.5 animate-slide-up pb-12">
 
       {/* Title */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-(--line) pb-5">
@@ -532,16 +532,16 @@ const Settings = () => {
           <div>
             {/* Desktop Table View */}
             <div className="hidden md:block max-h-[560px] overflow-auto">
-              <table className="w-full text-xs border-collapse">
+              <table className="w-full text-xs text-center border-collapse">
                 <thead className="sticky top-0 z-10">
                   <tr className="border-b border-(--line) bg-(--surface-mid)">
-                    <th className="text-left px-5 py-3.5 text-[10.5px] font-bold text-(--ink-muted) uppercase tracking-wider sticky top-0 bg-(--surface-mid) z-10">Username</th>
-                    <th className="text-left px-5 py-3.5 text-[10.5px] font-bold text-(--ink-muted) uppercase tracking-wider sticky top-0 bg-(--surface-mid) z-10">Role</th>
-                    <th className="text-left px-5 py-3.5 text-[10.5px] font-bold text-(--ink-muted) uppercase tracking-wider sticky top-0 bg-(--surface-mid) z-10">Firm / Branch</th>
-                    <th className="text-left px-5 py-3.5 text-[10.5px] font-bold text-(--ink-muted) uppercase tracking-wider sticky top-0 bg-(--surface-mid) z-10">Page Access</th>
-                    <th className="text-left px-5 py-3.5 text-[10.5px] font-bold text-(--ink-muted) uppercase tracking-wider sticky top-0 bg-(--surface-mid) z-10">Created</th>
+                    <th className="px-5 py-3.5 text-[10.5px] font-bold text-(--ink-muted) uppercase tracking-wider sticky top-0 bg-(--surface-mid) z-10">Username</th>
+                    <th className="px-5 py-3.5 text-[10.5px] font-bold text-(--ink-muted) uppercase tracking-wider sticky top-0 bg-(--surface-mid) z-10">Role</th>
+                    <th className="px-5 py-3.5 text-[10.5px] font-bold text-(--ink-muted) uppercase tracking-wider sticky top-0 bg-(--surface-mid) z-10">Firm / Branch</th>
+                    <th className="px-5 py-3.5 text-[10.5px] font-bold text-(--ink-muted) uppercase tracking-wider sticky top-0 bg-(--surface-mid) z-10">Page Access</th>
+                    <th className="px-5 py-3.5 text-[10.5px] font-bold text-(--ink-muted) uppercase tracking-wider sticky top-0 bg-(--surface-mid) z-10">Created</th>
                     {isAdmin && (
-                      <th className="text-right px-5 py-3.5 text-[10.5px] font-bold text-(--ink-muted) uppercase tracking-wider sticky top-0 bg-(--surface-mid) z-10">Actions</th>
+                      <th className="px-5 py-3.5 text-[10.5px] font-bold text-(--ink-muted) uppercase tracking-wider sticky top-0 bg-(--surface-mid) z-10">Actions</th>
                     )}
                   </tr>
                 </thead>
@@ -549,7 +549,7 @@ const Settings = () => {
                   {users.map(usr => (
                     <tr key={usr.id} className="hover:bg-(--brand-green-soft) transition-colors">
                       <td className="px-5 py-4">
-                        <div className="flex items-center gap-2.5">
+                        <div className="flex items-center justify-center gap-2.5">
                           <div className="w-8 h-8 rounded-full bg-(--surface-mid) border border-(--line) flex items-center justify-center text-[10px] font-bold text-(--ink-muted) uppercase">
                             {usr.username.slice(0, 2)}
                           </div>
@@ -562,7 +562,7 @@ const Settings = () => {
                         </span>
                       </td>
                       <td className="px-5 py-4">
-                        <div className="flex items-center gap-1.5 text-(--ink-muted) font-medium">
+                        <div className="flex items-center justify-center gap-1.5 text-(--ink-muted) font-medium">
                           <Building2 className="w-3.5 h-3.5" />
                           <span>{usr.firm_name === 'All' ? 'All Branches' : `${firmStringToArray(usr.firm_name).join(', ')} Branch`}</span>
                         </div>
@@ -575,7 +575,7 @@ const Settings = () => {
                         ) : (usr.page_access || []).length === 0 ? (
                           <span className="text-(--ink-faint) italic text-[11px]">No pages assigned</span>
                         ) : (
-                          <div className="flex flex-wrap gap-1.5">
+                          <div className="flex flex-wrap justify-center gap-1.5">
                             {groupPageAccessBadges(usr.page_access).map(b => {
                               const Icon = b.icon;
                               return (
@@ -600,7 +600,7 @@ const Settings = () => {
                       </td>
                       {isAdmin && (
                         <td className="px-5 py-4">
-                          <div className="flex items-center gap-2 justify-end">
+                          <div className="flex items-center gap-2 justify-center">
                             <button
                               onClick={() => openEdit(usr)}
                               className="p-2 rounded-lg bg-(--surface-mid) border border-(--line) text-(--ink-muted) hover:text-(--brand-green-dark) hover:border-(--brand-green)/30 hover:bg-(--brand-green-soft) transition-all cursor-pointer"

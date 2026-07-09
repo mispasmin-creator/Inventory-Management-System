@@ -891,14 +891,13 @@ const buildFinishedGoodAdjustmentMap = async (selectedDate = '') => {
 const buildLiftDataMaps = async (selectedDate = '') => {
   const pageSize = 1000;
   const liftRows = [];
-  const poRows = [];
 
   try {
     // 1. Fetch only receipts completed through Receipt Of Material / Physical Quality Check.
     for (let from = 0; ; from += pageSize) {
       const { data, error } = await purchaseSupabase
         .from('LIFT-ACCOUNTS')
-        .select('id, "Lift No", "Firm Name", "Raw Material Name", "Actual Quantity", "Transporting Rate", "Date Of Receiving", "Actual 1"')
+        .select('id, "Lift No", "Firm Name", "Raw Material Name", "Actual Quantity", "Rate", "Transporter Rate", "Lifting Qty", "Type Of Transporting Rate", "Date Of Receiving", "Actual 1"')
         .not('Actual 1', 'is', null)
         .not('Actual Quantity', 'is', null)
         .order('Actual 1', { ascending: false })
@@ -909,23 +908,11 @@ const buildLiftDataMaps = async (selectedDate = '') => {
       if (!data || data.length < pageSize) break;
     }
 
-    // 2. Fetch from INDENT-PO (for PO Rates)
-    for (let from = 0; ; from += pageSize) {
-      const { data, error } = await purchaseSupabase
-        .from('INDENT-PO')
-        .select('id, "Firm Name", "Material", "Rate"')
-        .order('id', { ascending: false })
-        .range(from, from + pageSize - 1);
-
-      if (error) throw error;
-      poRows.push(...(data || []));
-      if (!data || data.length < pageSize) break;
-    }
-
     const actualQuantityMap = {};
     const purchaseQuantityMap = {};
     const transportingRatesMap = {};
     const poRatesMap = {};
+    const latestReceivingDateMap = {};
 
     // Process LIFT-ACCOUNTS
     liftRows.forEach((row) => {
@@ -947,11 +934,26 @@ const buildLiftDataMaps = async (selectedDate = '') => {
         purchaseQuantityMap[key] = (purchaseQuantityMap[key] || 0) + actualQuantity;
       }
 
-      // Set the latest transporting rate
+      // Product Rate: take the Rate from the LIFT-ACCOUNTS record with the latest Date Of Receiving.
+      const liftMaterialRate = Number(row['Rate']);
+      if (rowDate && Number.isFinite(liftMaterialRate) && (latestReceivingDateMap[key] === undefined || rowDate > latestReceivingDateMap[key])) {
+        latestReceivingDateMap[key] = rowDate;
+        poRatesMap[key] = liftMaterialRate;
+      }
+
+      // Set the latest Per MT Transportation Rate (Transporter Rate / Lifting Qty,
+      // for both "Per MT" and "Fixed" transporting rate types)
       if (transportingRatesMap[key] === undefined) {
-        const transportingRate = Number(row['Transporting Rate']);
-        if (row['Transporting Rate'] !== null && row['Transporting Rate'] !== '' && Number.isFinite(transportingRate)) {
-          transportingRatesMap[key] = transportingRate;
+        const rateType = String(row['Type Of Transporting Rate'] || '').trim().toLowerCase();
+        const transporterRate = Number(row['Transporter Rate']);
+        const liftingQty = Number(row['Lifting Qty']);
+        if (
+          (rateType === 'per mt' || rateType === 'fixed') &&
+          Number.isFinite(transporterRate) &&
+          Number.isFinite(liftingQty) &&
+          liftingQty !== 0
+        ) {
+          transportingRatesMap[key] = transporterRate / liftingQty;
         }
       }
     });
@@ -981,23 +983,6 @@ const buildLiftDataMaps = async (selectedDate = '') => {
       actualQuantityMap[key] = (actualQuantityMap[key] || 0) + quantity;
     });
 
-    // Process INDENT-PO
-    poRows.forEach((row) => {
-      const firmKey = normalizeFirmKey(row['Firm Name']);
-      const itemKey = normalizeItemKey(row['Material']);
-      if (!firmKey || !itemKey) return;
-
-      const key = `${firmKey}::${itemKey}`;
-
-      // Set the latest PO rate
-      if (poRatesMap[key] === undefined) {
-        const rate = Number(row['Rate']);
-        if (row['Rate'] !== null && row['Rate'] !== '' && Number.isFinite(rate)) {
-          poRatesMap[key] = rate;
-        }
-      }
-    });
-
     // Merge rates
     const ratesMap = {};
     Object.keys(poRatesMap).forEach((key) => {
@@ -1016,6 +1001,8 @@ const buildLiftDataMaps = async (selectedDate = '') => {
     return {
       actualQuantityMap,
       ratesMap,
+      poRatesMap,
+      transportingRatesMap,
       annualProductionUsageMap,
       purchaseQuantityMap,
       productionUsageMap,
@@ -1032,6 +1019,8 @@ const buildLiftDataMaps = async (selectedDate = '') => {
     return {
       actualQuantityMap: {},
       ratesMap: {},
+      poRatesMap: {},
+      transportingRatesMap: {},
       annualProductionUsageMap: {},
       purchaseQuantityMap: {},
       productionUsageMap: {},
@@ -1079,6 +1068,8 @@ const mergeDuplicateInventoryRows = (rows) => {
       'optimum_stock',
       'actual_level',
       'product_rate',
+      'material_rate',
+      'transportation_rate',
       'optimum_stock_total',
       'stock_total',
       'unit',
@@ -1200,6 +1191,8 @@ export const apiService = {
         {
           actualQuantityMap,
           ratesMap,
+          poRatesMap,
+          transportingRatesMap,
           annualProductionUsageMap,
           purchaseQuantityMap,
           productionUsageMap,
@@ -1288,6 +1281,8 @@ export const apiService = {
             raw_material_sales: -salesRawQty,
             actual_level: actualLevel,
             product_rate: rate,
+            material_rate: poRatesMap[key] !== undefined ? poRatesMap[key] : (rate !== '' ? rate : ''),
+            transportation_rate: transportingRatesMap[key] !== undefined ? transportingRatesMap[key] : 0,
             optimum_stock_total: calculatedOptimumTotal,
             stock_total: calculatedStockTotal,
             unit: item.unit ?? '',

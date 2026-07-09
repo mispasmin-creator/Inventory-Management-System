@@ -10,6 +10,7 @@ const Table = ({
   filterPlaceholder = "All Categories",
   exportFileName = "report",
   actions = null,
+  legend = null,
   disableSorting = false,
   serverSide = false,
   serverTotalItems = 0,
@@ -199,7 +200,7 @@ const Table = ({
           <button
             onClick={exportToCSV}
             disabled={data.length === 0}
-            className="flex items-center gap-1.5 px-4 py-2.5 text-xs rounded-xl bg-(--surface-mid) text-(--ink-muted) border border-(--line) hover:border-(--brand-green)/30 hover:bg-(--brand-green-soft) hover:text-(--brand-green-dark) disabled:opacity-50 disabled:cursor-not-allowed font-semibold transition-all duration-150 cursor-pointer"
+            className="btn-green-solid disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <Download className="w-3.5 h-3.5" />
             <span>Export CSV</span>
@@ -207,10 +208,22 @@ const Table = ({
         </div>
       </div>
 
+      {/* Colour-coding legend */}
+      {legend && legend.length > 0 && (
+        <div className="status-legend">
+          {legend.map((item, idx) => (
+            <span key={idx} className="status-legend-pill">
+              <span className="status-legend-swatch" style={{ background: item.color }} />
+              {item.label}
+            </span>
+          ))}
+        </div>
+      )}
+
       {/* Main Table Grid */}
-      <div className="max-h-[70vh] overflow-auto rounded-2xl border border-(--line) bg-(--surface) shadow-sm">
-        <table className="w-full border-collapse text-left text-xs text-(--ink)">
-          <thead className="bg-(--surface-mid) uppercase tracking-wider text-(--ink-muted) border-b border-(--line) sticky top-0 z-10">
+      <div className="max-h-[70vh] overflow-auto rounded-2xl border border-(--line) bg-(--surface) shadow-md">
+        <table className="w-full border-collapse text-center text-xs text-(--ink)">
+          <thead className="table-header-green uppercase tracking-wider sticky top-0 z-10">
             <tr>
               {columns.map((col, idx) => {
                 const isSortable = !disableSorting && col.sortable !== false && col.accessor;
@@ -222,7 +235,7 @@ const Table = ({
                       isSortable ? 'cursor-pointer hover:bg-(--brand-green-soft) hover:text-(--brand-green-dark) select-none transition-colors duration-150' : ''
                     }`}
                   >
-                    <div className="flex items-center gap-1.5">
+                    <div className="flex items-center justify-center gap-1.5">
                       <span>{col.header}</span>
                       {isSortable && (
                         <span className="text-(--ink-faint)">

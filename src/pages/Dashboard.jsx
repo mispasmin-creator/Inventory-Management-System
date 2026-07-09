@@ -562,7 +562,7 @@ const Dashboard = () => {
 
   if (loading) {
     return (
-      <div className="max-w-7xl mx-auto p-1.5">
+      <div className="w-full p-1.5">
         <DashboardSkeleton />
       </div>
     );
@@ -572,7 +572,7 @@ const Dashboard = () => {
   const COLORS = ['var(--brand-green)', 'var(--chart-blue)', 'var(--chart-purple)', '#06b6d4', 'var(--chart-amber)', 'var(--chart-green)', 'var(--chart-red)'];
 
   return (
-    <div className="space-y-6 max-w-7xl mx-auto p-1.5 animate-slide-up pb-12">
+    <div className="space-y-6 w-full p-1.5 animate-slide-up pb-12">
       
       {/* 1. Header Section */}
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-slate-200/60 dark:border-[#2e382d] pb-5">
@@ -969,15 +969,15 @@ const Dashboard = () => {
         {/* Per-product breakdown table */}
         <GlassCard className="space-y-3">
           <div className="overflow-x-auto max-h-[420px]">
-            <table className="w-full text-left text-xs border-collapse">
+            <table className="w-full text-center text-xs border-collapse">
               <thead>
                 <tr className="bg-slate-50 dark:bg-[#171f17] text-slate-500 uppercase tracking-wider border-b border-slate-200 dark:border-[#2e382d]">
                   <th className="px-4 py-2.5 font-bold">Product</th>
-                  <th className="px-4 py-2.5 font-bold text-right">Purchase</th>
-                  <th className="px-4 py-2.5 font-bold text-right">{productionLabel}</th>
-                  <th className="px-4 py-2.5 font-bold text-right">{salesLabel}</th>
-                  <th className="px-4 py-2.5 font-bold text-right">Returns</th>
-                  <th className="px-4 py-2.5 font-bold text-right">Current Stock</th>
+                  <th className="px-4 py-2.5 font-bold">Purchase</th>
+                  <th className="px-4 py-2.5 font-bold">{productionLabel}</th>
+                  <th className="px-4 py-2.5 font-bold">{salesLabel}</th>
+                  <th className="px-4 py-2.5 font-bold">Returns</th>
+                  <th className="px-4 py-2.5 font-bold">Current Stock</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-[#2e382d]">
@@ -991,19 +991,19 @@ const Dashboard = () => {
                   productSummaryList.map((p, idx) => (
                     <tr key={idx} className="hover:bg-slate-50/50 dark:hover:bg-brand-green-soft">
                       <td className="px-4 py-2.5 font-semibold text-(--ink)">{p.name}</td>
-                      <td className="px-4 py-2.5 text-right text-sky-700 dark:text-sky-400 font-bold">
+                      <td className="px-4 py-2.5 text-sky-700 dark:text-sky-400 font-bold">
                         {p.purchase.toLocaleString(undefined, { maximumFractionDigits: 1 })} {p.unit}
                       </td>
-                      <td className="px-4 py-2.5 text-right text-violet-700 dark:text-violet-400 font-bold">
+                      <td className="px-4 py-2.5 text-violet-700 dark:text-violet-400 font-bold">
                         {p.production.toLocaleString(undefined, { maximumFractionDigits: 1 })} {p.unit}
                       </td>
-                      <td className="px-4 py-2.5 text-right text-emerald-700 dark:text-emerald-400 font-bold">
+                      <td className="px-4 py-2.5 text-emerald-700 dark:text-emerald-400 font-bold">
                         {p.sales.toLocaleString(undefined, { maximumFractionDigits: 1 })} {p.unit}
                       </td>
-                      <td className="px-4 py-2.5 text-right text-rose-600 dark:text-rose-400 font-bold">
+                      <td className="px-4 py-2.5 text-rose-600 dark:text-rose-400 font-bold">
                         {p.returns.toLocaleString(undefined, { maximumFractionDigits: 1 })} {p.unit}
                       </td>
-                      <td className="px-4 py-2.5 text-right font-black text-(--ink)">
+                      <td className="px-4 py-2.5 font-black text-(--ink)">
                         {p.stock.toLocaleString(undefined, { maximumFractionDigits: 1 })} {p.unit}
                       </td>
                     </tr>
@@ -1297,16 +1297,16 @@ const Dashboard = () => {
 
         <div className="overflow-x-auto max-h-[420px] rounded-xl border border-(--line)">
           {activeTab === 'raw_materials' ? (
-            <table className="w-full text-left text-xs border-collapse">
+            <table className="w-full text-center text-xs border-collapse">
               <thead>
                 <tr className="bg-(--surface-mid) text-(--ink-muted) uppercase tracking-wider border-b border-(--line) sticky top-0 z-10">
                   <th className="px-4 py-3 font-bold text-[10.5px]">Material Name</th>
                   <th className="px-4 py-3 font-bold text-[10.5px]">Branch</th>
-                  <th className="px-4 py-3 font-bold text-[10.5px] text-right">Actual Stock</th>
-                  <th className="px-4 py-3 font-bold text-[10.5px] text-right">Optimum Buffer</th>
-                  <th className="px-4 py-3 font-bold text-[10.5px] text-right">Unit rate</th>
-                  <th className="px-4 py-3 font-bold text-[10.5px] text-right">Total Valuation</th>
-                  <th className="px-4 py-3 font-bold text-[10.5px] text-center">Status</th>
+                  <th className="px-4 py-3 font-bold text-[10.5px]">Actual Stock</th>
+                  <th className="px-4 py-3 font-bold text-[10.5px]">Optimum Buffer</th>
+                  <th className="px-4 py-3 font-bold text-[10.5px]">Unit rate</th>
+                  <th className="px-4 py-3 font-bold text-[10.5px]">Total Valuation</th>
+                  <th className="px-4 py-3 font-bold text-[10.5px]">Status</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-(--line-soft)">
@@ -1320,12 +1320,12 @@ const Dashboard = () => {
                     <tr key={idx} className="hover:bg-(--brand-green-soft) transition-colors duration-150">
                       <td className="px-4 py-2.5 font-semibold text-(--ink)">{item.itemName}</td>
                       <td className="px-4 py-2.5 text-(--ink-muted) font-bold uppercase">{item.branchName}</td>
-                      <td className={`px-4 py-2.5 text-right font-black ${isLow ? 'text-rose-600' : 'text-(--ink)'}`}>
+                      <td className={`px-4 py-2.5 font-black ${isLow ? 'text-rose-600' : 'text-(--ink)'}`}>
                         {actualLevel.toLocaleString(undefined, { maximumFractionDigits: 1 })} {item.unit}
                       </td>
-                      <td className="px-4 py-2.5 text-right text-(--ink-muted)">{optimumStock.toLocaleString()} {item.unit}</td>
-                      <td className="px-4 py-2.5 text-right text-(--ink-muted)">₹{rate.toLocaleString(undefined, { maximumFractionDigits: 0 })}</td>
-                      <td className="px-4 py-2.5 text-right font-bold text-(--ink-muted)">₹{valuation.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
+                      <td className="px-4 py-2.5 text-(--ink-muted)">{optimumStock.toLocaleString()} {item.unit}</td>
+                      <td className="px-4 py-2.5 text-(--ink-muted)">₹{rate.toLocaleString(undefined, { maximumFractionDigits: 0 })}</td>
+                      <td className="px-4 py-2.5 font-bold text-(--ink-muted)">₹{valuation.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</td>
                       <td className="px-4 py-2.5 text-center">
                         {isLow ? (
                           <span className="px-2 py-0.5 rounded text-[10px] font-black bg-rose-100 text-rose-800 border border-rose-200 dark:bg-rose-950/20 dark:text-rose-400 dark:border-rose-900/30">
@@ -1343,16 +1343,16 @@ const Dashboard = () => {
               </tbody>
             </table>
           ) : (
-            <table className="w-full text-left text-xs border-collapse">
+            <table className="w-full text-center text-xs border-collapse">
               <thead>
                 <tr className="bg-(--surface-mid) text-(--ink-muted) uppercase tracking-wider border-b border-(--line) sticky top-0 z-10">
                   <th className="px-4 py-3 font-bold text-[10.5px]">Product Name</th>
                   <th className="px-4 py-3 font-bold text-[10.5px]">Branch</th>
-                  <th className="px-4 py-3 font-bold text-[10.5px] text-right">Available Stock</th>
-                  <th className="px-4 py-3 font-bold text-[10.5px] text-right">Production</th>
-                  <th className="px-4 py-3 font-bold text-[10.5px] text-right">Sales / Dispatched</th>
-                  <th className="px-4 py-3 font-bold text-[10.5px] text-right">Pending Backlog</th>
-                  <th className="px-4 py-3 font-bold text-[10.5px] text-center">Fulfillment Status</th>
+                  <th className="px-4 py-3 font-bold text-[10.5px]">Available Stock</th>
+                  <th className="px-4 py-3 font-bold text-[10.5px]">Production</th>
+                  <th className="px-4 py-3 font-bold text-[10.5px]">Sales / Dispatched</th>
+                  <th className="px-4 py-3 font-bold text-[10.5px]">Pending Backlog</th>
+                  <th className="px-4 py-3 font-bold text-[10.5px]">Fulfillment Status</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-(--line-soft)">
@@ -1366,12 +1366,12 @@ const Dashboard = () => {
                     <tr key={idx} className="hover:bg-(--brand-green-soft) transition-colors duration-150">
                       <td className="px-4 py-2.5 font-semibold text-(--ink)">{item.productName}</td>
                       <td className="px-4 py-2.5 text-(--ink-muted) font-bold uppercase">{item.branchName}</td>
-                      <td className={`px-4 py-2.5 text-right font-black ${hasShortage ? 'text-rose-600' : 'text-(--ink)'}`}>
+                      <td className={`px-4 py-2.5 font-black ${hasShortage ? 'text-rose-600' : 'text-(--ink)'}`}>
                         {currentLevel.toLocaleString(undefined, { maximumFractionDigits: 1 })} {item.unit || 'Tons'}
                       </td>
-                      <td className="px-4 py-2.5 text-right text-(--ink-muted)">{production.toLocaleString()} Tons</td>
-                      <td className="px-4 py-2.5 text-right text-(--ink-muted)">{sales.toLocaleString()} Tons</td>
-                      <td className="px-4 py-2.5 text-right text-(--ink-muted)">{pending.toLocaleString()} Tons</td>
+                      <td className="px-4 py-2.5 text-(--ink-muted)">{production.toLocaleString()} Tons</td>
+                      <td className="px-4 py-2.5 text-(--ink-muted)">{sales.toLocaleString()} Tons</td>
+                      <td className="px-4 py-2.5 text-(--ink-muted)">{pending.toLocaleString()} Tons</td>
                       <td className="px-4 py-2.5 text-center">
                         {hasShortage ? (
                           <span className="px-2 py-0.5 rounded text-[10px] font-black bg-rose-100 text-rose-800 border border-rose-200 dark:bg-rose-950/20 dark:text-rose-400 dark:border-rose-900/30">

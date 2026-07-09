@@ -115,8 +115,6 @@ const Header = () => {
         alignItems: 'center',
         justifyContent: 'space-between',
         padding: '0 28px',
-        background: 'var(--surface)',
-        borderBottom: '1px solid var(--line)',
       }}
     >
       {/* ── Left: Date Display & Page Title ──────────────────── */}
@@ -127,9 +125,9 @@ const Header = () => {
         </div>
         <h1
           style={{
-            fontSize: '1.2rem',
-            fontWeight: 700,
-            color: 'var(--ink)',
+            fontSize: '1.25rem',
+            fontWeight: 800,
+            color: 'var(--brand-green)',
             margin: 0,
             lineHeight: 1.2,
             display: 'flex',
@@ -424,6 +422,19 @@ const Header = () => {
             )}
           </AnimatePresence>
         </div>
+
+        {/* Persistent Logout Button */}
+        <button
+          onClick={() => {
+            logout();
+            navigate("/login");
+          }}
+          className="btn-red-logout"
+          title="Log Out"
+        >
+          <LogOut style={{ width: '14px', height: '14px' }} />
+          <span className="hidden sm:inline">Logout</span>
+        </button>
       </div>
 
       <style>{`
