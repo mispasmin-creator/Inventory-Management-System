@@ -57,6 +57,15 @@ const ALL_PAGE_GROUPS = [
       { key: 'StockAdjustment_Rkl', label: 'Rkl Branch' },
     ]
   },
+  {
+    group: 'Stock Adjustment Tabs',
+    icon: Layers,
+    pages: [
+      { key: 'StockAdjustmentTab_Adjustments', label: 'Stock Adjustment Tab' },
+      { key: 'StockAdjustmentTab_OpStock', label: 'OP. Stock Tab' },
+      { key: 'StockAdjustmentTab_Products', label: 'Products Tab' },
+    ]
+  },
   { group: null, pages: [
     { key: 'Settings',  label: 'System Settings',  icon: Cog },
     { key: 'Dashboard', label: 'Dashboard',        icon: LayoutDashboard },

@@ -903,6 +903,46 @@ const RATE_DIVIDE_BY_1000_ITEM_KEYS = new Set([
   'Light Diesel Oil'
 ].map(normalizeItemKey));
 
+// Rates entered manually in Stock Adjustment's "Product Rate" tab (stock_adjustment.rate).
+// Used only as a fallback when the purchase system (LIFT-ACCOUNTS) has no rate for that item.
+const buildProductTabRateMap = async () => {
+  const pageSize = 1000;
+  const rateMap = {};
+
+  try {
+    for (let from = 0; ; from += pageSize) {
+      const { data, error } = await supabase
+        .from('stock_adjustment')
+        .select('firm_name, item_name, rate')
+        .eq('material_type', 'raw_material')
+        .not('rate', 'is', null)
+        .order('created_at', { ascending: false })
+        .range(from, from + pageSize - 1);
+
+      if (error) throw error;
+
+      (data || []).forEach((row) => {
+        const firmKey = normalizeFirmKey(row.firm_name);
+        const itemKey = normalizeItemKey(row.item_name);
+        const rate = Number(row.rate);
+        if (!firmKey || !itemKey || !Number.isFinite(rate)) return;
+
+        const key = `${firmKey}::${itemKey}`;
+        // Rows are ordered newest-first, so the first rate seen per key is the latest one.
+        if (rateMap[key] === undefined) {
+          rateMap[key] = rate;
+        }
+      });
+
+      if (!data || data.length < pageSize) break;
+    }
+  } catch (error) {
+    console.warn('Supabase product tab rate sync failed:', error.message);
+  }
+
+  return rateMap;
+};
+
 // Same "Unload Approval" completion filter used for the packaging bag rate calculation.
 const isUnloadApprovalComplete = (row) => {
   const status = row['Unload Approval Status'];
@@ -1254,10 +1294,12 @@ export const apiService = {
           crushingLumpsMap,
           crushingOutputsMap
         },
+        productTabRateMap,
         salesRawOrdersResult
       ] = await Promise.all([
         query,
         buildLiftDataMaps(selectedDate),
+        buildProductTabRateMap(),
         salesRawSupabase
           .from('orders')
           .select('*')
@@ -1293,7 +1335,9 @@ export const apiService = {
       const inventoryRows = mergeDuplicateInventoryRows((data || [])
         .map((item, index) => {
           const key = `${normalizeFirmKey(item.firm_name)}::${normalizeItemKey(item.item_name)}`;
-          const baseRate = poRatesMap[key] !== undefined ? poRatesMap[key] : (item.product_rate ?? '');
+          const baseRate = poRatesMap[key] !== undefined
+            ? poRatesMap[key]
+            : (productTabRateMap[key] !== undefined ? productTabRateMap[key] : (item.product_rate ?? ''));
           const transRate = transportingRatesMap[key] || 0;
           let rate = baseRate;
           if (rate !== '') {

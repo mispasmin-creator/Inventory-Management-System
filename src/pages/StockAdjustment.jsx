@@ -12,6 +12,15 @@ import { supabase } from '../services/supabaseClient';
 const branchOptions = ['Purab', 'Pmmpl', 'Rkl'];
 const normalizeFirmName = (value) => value === 'Madhya' ? 'Pmmpl' : value;
 
+// Tab-level permission keys: additive on top of the branch-level StockAdjustment_* access.
+// If a user has none of these assigned, all tabs stay visible (backward compatible with
+// existing users configured before this permission existed).
+const STOCK_ADJUSTMENT_TAB_KEYS = {
+  adjustments: 'StockAdjustmentTab_Adjustments',
+  op_stock: 'StockAdjustmentTab_OpStock',
+  products: 'StockAdjustmentTab_Products',
+};
+
 const defaultFormValues = {
   date: new Date().toISOString().split('T')[0],
   firmName: '',
@@ -37,6 +46,8 @@ const StockAdjustment = () => {
   const [finishItemOptions, setFinishItemOptions] = useState([]);
   const [rawMaterialOpStockRows, setRawMaterialOpStockRows] = useState([]);
   const [finishGoodOpStockRows, setFinishGoodOpStockRows] = useState([]);
+  const [productRateRows, setProductRateRows] = useState([]);
+  const [productRateLoading, setProductRateLoading] = useState(false);
   const [loading, setLoading] = useState(false);
   const [rawEntryFormOpen, setRawEntryFormOpen] = useState(false);
   const [finishEntryFormOpen, setFinishEntryFormOpen] = useState(false);
@@ -44,6 +55,7 @@ const StockAdjustment = () => {
   const [productRateFormOpen, setProductRateFormOpen] = useState(false);
   const [editingOpStockRow, setEditingOpStockRow] = useState(null);
   const [editingAdjustment, setEditingAdjustment] = useState(null);
+  const [editingProductRate, setEditingProductRate] = useState(null);
   const [opStockMaterialType, setOpStockMaterialType] = useState('finish_good');
 
   const [currentPage, setCurrentPage] = useState(1);
@@ -77,6 +89,24 @@ const StockAdjustment = () => {
     if (granularStockAccess.length === 0) return firmsFromLogin;
     return firmsFromLogin.filter(firmName => granularStockAccess.includes(firmName));
   }, [user]);
+
+  const visibleTabs = useMemo(() => {
+    const allTabs = Object.keys(STOCK_ADJUSTMENT_TAB_KEYS);
+    if (user?.role === 'Admin') return allTabs;
+
+    const pageAccess = user?.page_access || [];
+    const hasAnyTabPermissionConfigured = Object.values(STOCK_ADJUSTMENT_TAB_KEYS)
+      .some(key => pageAccess.includes(key));
+
+    if (!hasAnyTabPermissionConfigured) return allTabs;
+    return allTabs.filter(tabKey => pageAccess.includes(STOCK_ADJUSTMENT_TAB_KEYS[tabKey]));
+  }, [user]);
+
+  useEffect(() => {
+    if (visibleTabs.length > 0 && !visibleTabs.includes(activeTab)) {
+      setActiveTab(visibleTabs[0]);
+    }
+  }, [visibleTabs, activeTab]);
 
   const defaultFirmName = accessibleFirms.length === 1 ? accessibleFirms[0] : '';
   const getDefaultFormValues = () => ({ ...defaultFormValues, firmName: defaultFirmName });
@@ -127,6 +157,11 @@ const StockAdjustment = () => {
 
   useEffect(() => {
     if (!user) return;
+    fetchProductRates();
+  }, [user, accessibleFirms]);
+
+  useEffect(() => {
+    if (!user) return;
     fetchStockAdjustments();
   }, [user, currentPage, pageSize, debouncedSearchQuery, firmFilter, accessibleFirms]);
 
@@ -143,8 +178,9 @@ const StockAdjustment = () => {
       let query = supabase
         .from('stock_adjustment')
         .select('id, entry_date, firm_name, item_name, qty, remark, status, material_type, created_at', { count: 'exact' })
+        .not('qty', 'is', null)
         .order('created_at', { ascending: false });
-        
+
       query = restrictQueryToAccessibleFirms(query);
 
       if (firmFilter) {
@@ -171,6 +207,31 @@ const StockAdjustment = () => {
       showError(e.message || 'Failed to load stock adjustment entries.');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchProductRates = async () => {
+    setProductRateLoading(true);
+    try {
+      let query = supabase
+        .from('stock_adjustment')
+        .select('id, firm_name, item_name, material_type, rate, created_at')
+        .not('rate', 'is', null)
+        .order('created_at', { ascending: false });
+
+      query = restrictQueryToAccessibleFirms(query);
+
+      const { data, error } = await query;
+
+      if (error) throw error;
+      setProductRateRows((data || []).map(row => ({
+        ...row,
+        firm_name: normalizeFirmName(row.firm_name)
+      })));
+    } catch (e) {
+      showError(e.message || 'Failed to load product rates.');
+    } finally {
+      setProductRateLoading(false);
     }
   };
 
@@ -392,30 +453,77 @@ const StockAdjustment = () => {
 
   const onProductRateSubmit = async (data) => {
     try {
-      const { error } = await supabase
-        .from('stock_adjustment')
-        .insert([{
-          entry_date: new Date().toISOString().split('T')[0],
-          firm_name: data.firmName,
-          item_name: data.itemName,
-          material_type: data.materialType,
-          rate: Number(data.rate)
-        }]);
+      if (editingProductRate) {
+        const { error } = await supabase
+          .from('stock_adjustment')
+          .update({
+            firm_name: data.firmName,
+            item_name: data.itemName,
+            material_type: data.materialType,
+            rate: Number(data.rate)
+          })
+          .eq('id', editingProductRate.id);
 
-      if (error) throw error;
+        if (error) throw error;
+        showSuccess('Product rate updated successfully.');
+      } else {
+        const { error } = await supabase
+          .from('stock_adjustment')
+          .insert([{
+            entry_date: new Date().toISOString().split('T')[0],
+            firm_name: data.firmName,
+            item_name: data.itemName,
+            material_type: data.materialType,
+            rate: Number(data.rate)
+          }]);
 
-      showSuccess('Product rate saved successfully.');
-      fetchStockAdjustments();
+        if (error) throw error;
+        showSuccess('Product rate saved successfully.');
+      }
+      fetchProductRates();
       resetProductRate({ ...productRateDefaultValues, firmName: defaultFirmName });
       setProductRateFormOpen(false);
+      setEditingProductRate(null);
     } catch (e) {
       showError(e.message || 'Failed to save product rate.');
     }
   };
 
   const openProductRateForm = () => {
+    setEditingProductRate(null);
     resetProductRate({ ...productRateDefaultValues, firmName: defaultFirmName });
     setProductRateFormOpen(true);
+  };
+
+  const openEditProductRateForm = (row) => {
+    setEditingProductRate(row);
+    resetProductRate({
+      materialType: row.material_type,
+      firmName: row.firm_name,
+      itemName: row.item_name,
+      rate: row.rate
+    });
+    setProductRateFormOpen(true);
+  };
+
+  const handleDeleteProductRate = async (row) => {
+    if (!window.confirm(`Remove product rate for ${row.item_name}?`)) {
+      return;
+    }
+
+    try {
+      const { error } = await supabase
+        .from('stock_adjustment')
+        .delete()
+        .eq('id', row.id);
+
+      if (error) throw error;
+
+      showSuccess('Product rate removed successfully.');
+      fetchProductRates();
+    } catch (e) {
+      showError(e.message || 'Failed to remove product rate.');
+    }
   };
 
   const openNewOpStockForm = (materialType) => {
@@ -585,25 +693,46 @@ const StockAdjustment = () => {
     }
   ];
 
-  const productRows = useMemo(() => [
-    ...rawItemOptions.map(row => ({
-      id: `raw-${row.id}`,
-      material_label: 'Raw Material',
-      firm_name: row.firm_name,
-      display_name: row.item_name
-    })),
-    ...finishItemOptions.map(row => ({
-      id: `finish-${row.id}`,
-      material_label: 'Finished Good',
-      firm_name: row.firm_name,
-      display_name: row.product_name
-    }))
-  ], [finishItemOptions, rawItemOptions]);
-
-  const productColumns = [
-    { header: 'Type', accessor: 'material_label' },
-    { header: 'Firm Name', accessor: 'firm_name' },
-    { header: 'Item / Product Name', accessor: 'display_name' }
+  const productRateColumns = [
+    {
+      header: 'Type',
+      accessor: 'material_type',
+      render: (row) => row.material_type === 'finish_good' ? 'Finished Good' : 'Raw Material'
+    },
+    { header: 'Firm Name', accessor: 'firm_name', render: (row) => row.firm_name || '-' },
+    { header: 'Item / Product Name', accessor: 'item_name' },
+    {
+      header: 'Product Rate',
+      accessor: 'rate',
+      render: (row) => row.rate !== null && row.rate !== undefined
+        ? Number(row.rate).toLocaleString('en-IN', { maximumFractionDigits: 3 })
+        : '-'
+    },
+    {
+      header: 'Action',
+      accessor: '',
+      sortable: false,
+      render: (row) => (
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => openEditProductRateForm(row)}
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-indigo-600/20 text-indigo-300 hover:bg-indigo-600 hover:text-white transition-colors cursor-pointer"
+          >
+            <Edit3 className="w-3.5 h-3.5" />
+            Edit
+          </button>
+          <button
+            type="button"
+            onClick={() => handleDeleteProductRate(row)}
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-rose-600/20 text-red-600 hover:bg-rose-600 hover:text-white transition-colors cursor-pointer"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+            Delete
+          </button>
+        </div>
+      )
+    }
   ];
 
   const opStockColumns = [
@@ -820,7 +949,10 @@ const StockAdjustment = () => {
       <div className="pt-3 border-t border-slate-800 flex justify-end gap-3 text-xs">
         <button
           type="button"
-          onClick={() => setProductRateFormOpen(false)}
+          onClick={() => {
+            setProductRateFormOpen(false);
+            setEditingProductRate(null);
+          }}
           className="px-4 py-2.5 rounded-lg bg-slate-800 text-slate-400 hover:text-slate-200 cursor-pointer"
         >
           Cancel
@@ -829,7 +961,7 @@ const StockAdjustment = () => {
           type="submit"
           className="px-4 py-2.5 rounded-lg bg-indigo-600 text-white font-semibold hover:bg-indigo-500 cursor-pointer"
         >
-          Add Product Rate
+          {editingProductRate ? 'Update Product Rate' : 'Add Product Rate'}
         </button>
       </div>
     </form>
@@ -901,39 +1033,45 @@ const StockAdjustment = () => {
       </div>
 
       <div className="flex gap-2 border-b border-slate-800">
-        <button
-          type="button"
-          onClick={() => setActiveTab('adjustments')}
-          className={`px-4 py-2.5 text-xs font-semibold border-b-2 transition-colors cursor-pointer ${
-            activeTab === 'adjustments'
-              ? 'border-indigo-500 text-indigo-300'
-              : 'border-transparent text-slate-500 hover:text-slate-300'
-          }`}
-        >
-          Stock Adjustments
-        </button>
-        <button
-          type="button"
-          onClick={() => setActiveTab('op_stock')}
-          className={`px-4 py-2.5 text-xs font-semibold border-b-2 transition-colors cursor-pointer ${
-            activeTab === 'op_stock'
-              ? 'border-black text-black'
-              : 'border-transparent text-black hover:text-slate-700'
-          }`}
-        >
-          OP. Stock
-        </button>
-        <button
-          type="button"
-          onClick={() => setActiveTab('products')}
-          className={`px-4 py-2.5 text-xs font-semibold border-b-2 transition-colors cursor-pointer ${
-            activeTab === 'products'
-              ? 'border-emerald-500 text-emerald-300'
-              : 'border-transparent text-slate-500 hover:text-slate-300'
-          }`}
-        >
-          Products
-        </button>
+        {visibleTabs.includes('adjustments') && (
+          <button
+            type="button"
+            onClick={() => setActiveTab('adjustments')}
+            className={`px-4 py-2.5 text-xs font-semibold border-b-2 transition-colors cursor-pointer ${
+              activeTab === 'adjustments'
+                ? 'border-indigo-500 text-indigo-300'
+                : 'border-transparent text-slate-500 hover:text-slate-300'
+            }`}
+          >
+            Stock Adjustments
+          </button>
+        )}
+        {visibleTabs.includes('op_stock') && (
+          <button
+            type="button"
+            onClick={() => setActiveTab('op_stock')}
+            className={`px-4 py-2.5 text-xs font-semibold border-b-2 transition-colors cursor-pointer ${
+              activeTab === 'op_stock'
+                ? 'border-black text-black'
+                : 'border-transparent text-black hover:text-slate-700'
+            }`}
+          >
+            OP. Stock
+          </button>
+        )}
+        {visibleTabs.includes('products') && (
+          <button
+            type="button"
+            onClick={() => setActiveTab('products')}
+            className={`px-4 py-2.5 text-xs font-semibold border-b-2 transition-colors cursor-pointer ${
+              activeTab === 'products'
+                ? 'border-emerald-500 text-emerald-300'
+                : 'border-transparent text-slate-500 hover:text-slate-300'
+            }`}
+          >
+            Products
+          </button>
+        )}
       </div>
 
       <GlassCard className="p-2 sm:p-6">
@@ -942,7 +1080,7 @@ const StockAdjustment = () => {
             ? 'Stock Adjustment Entries'
             : activeTab === 'op_stock'
               ? 'Manual OP. Stock Entries'
-              : 'Raw Material & Finished Good Products'}
+              : 'Product Rates'}
         </h3>
         {activeTab === 'op_stock' ? (
           <Table
@@ -957,14 +1095,14 @@ const StockAdjustment = () => {
           />
         ) : activeTab === 'products' ? (
           <Table
-            isLoading={loading}
-            columns={productColumns}
-            data={productRows}
-            searchPlaceholder="Search products..."
-            filterKey="material_label"
-            filterOptions={['Raw Material', 'Finished Good']}
+            isLoading={productRateLoading}
+            columns={productRateColumns}
+            data={productRateRows}
+            searchPlaceholder="Search product rates..."
+            filterKey="material_type"
+            filterOptions={['raw_material', 'finish_good']}
             filterPlaceholder="Filter Type"
-            exportFileName="product_master"
+            exportFileName="product_rates"
           />
         ) : (
           <Table
@@ -1026,8 +1164,11 @@ const StockAdjustment = () => {
 
       <Modal
         isOpen={productRateFormOpen}
-        onClose={() => setProductRateFormOpen(false)}
-        title="Add Product Rate"
+        onClose={() => {
+          setProductRateFormOpen(false);
+          setEditingProductRate(null);
+        }}
+        title={editingProductRate ? 'Edit Product Rate' : 'Add Product Rate'}
       >
         {renderProductRateForm()}
       </Modal>
