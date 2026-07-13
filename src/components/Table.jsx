@@ -1,5 +1,5 @@
-import React, { useState, useMemo } from 'react';
-import { Search, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Download, Filter } from 'lucide-react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
+import { Search, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Download, Filter, Columns } from 'lucide-react';
 
 const Table = ({ 
   columns, 
@@ -29,6 +29,28 @@ const Table = ({
   const [localCurrentPage, setLocalCurrentPage] = useState(1);
   const [localPageSize, setLocalPageSize] = useState(100);
   const [activeLegendValue, setActiveLegendValue] = useState(null);
+
+  const [columnVisibility, setColumnVisibility] = useState(() => {
+    const initial = {};
+    columns.forEach(c => {
+      if (c.header) initial[c.header] = true;
+    });
+    return initial;
+  });
+  const [showColumnFilter, setShowColumnFilter] = useState(false);
+  const columnFilterRef = useRef(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (columnFilterRef.current && !columnFilterRef.current.contains(event.target)) {
+        setShowColumnFilter(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const activeColumns = columns.filter(col => columnVisibility[col.header] !== false);
 
   const handleLegendClick = (value) => {
     setActiveLegendValue(prev => (prev === value ? null : value));
@@ -141,11 +163,11 @@ const Table = ({
     if (processedData.length === 0) return;
 
     // Headers
-    const headers = columns.map(c => c.header).join(',');
+    const headers = activeColumns.map(c => c.header).join(',');
     
     // Rows
     const rows = processedData.map(row => {
-      return columns.map(col => {
+      return activeColumns.map(col => {
         let cellVal = '';
         if (typeof col.accessor === 'function') {
           cellVal = col.accessor(row);
@@ -212,6 +234,44 @@ const Table = ({
           {/* Table Custom Actions Slot */}
           {actions}
 
+          {/* Column Filter Dropdown */}
+          <div className="relative flex items-center shrink-0" ref={columnFilterRef}>
+            <button
+              onClick={() => setShowColumnFilter(!showColumnFilter)}
+              className="flex items-center gap-2 px-3 py-2.5 text-xs rounded-xl glass-input cursor-pointer font-medium hover:bg-(--surface-mid) transition-colors"
+            >
+              <Columns className="w-3.5 h-3.5 text-(--ink-faint)" />
+              <span>Columns</span>
+              <ChevronDown className={`w-3.5 h-3.5 text-(--ink-faint) transition-transform ${showColumnFilter ? 'rotate-180' : ''}`} />
+            </button>
+            
+            {showColumnFilter && (
+              <div className="absolute right-0 top-full mt-2 w-48 bg-(--surface) border border-(--line) rounded-xl shadow-lg z-50 p-2 max-h-64 overflow-y-auto">
+                <div className="text-[10px] uppercase font-bold tracking-wider text-(--ink-faint) mb-2 px-2 pt-1">
+                  Show/Hide Columns
+                </div>
+                <div className="flex flex-col gap-1">
+                  {columns.map((col, idx) => col.header ? (
+                    <label key={idx} className="flex items-center gap-2.5 px-2 py-1.5 hover:bg-(--surface-mid) rounded-lg cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={columnVisibility[col.header] !== false}
+                        onChange={(e) => {
+                          setColumnVisibility(prev => ({
+                            ...prev,
+                            [col.header]: e.target.checked
+                          }));
+                        }}
+                        className="rounded text-(--brand-green) focus:ring-(--brand-green) w-3.5 h-3.5 cursor-pointer accent-(--brand-green)"
+                      />
+                      <span className="text-xs text-(--ink) font-medium truncate">{col.header}</span>
+                    </label>
+                  ) : null)}
+                </div>
+              </div>
+            )}
+          </div>
+
           {/* Export to CSV Button */}
           <button
             onClick={exportToCSV}
@@ -251,7 +311,7 @@ const Table = ({
         <table className="w-full border-collapse text-center text-xs text-(--ink)">
           <thead className="table-header-green uppercase tracking-wider sticky top-0 z-10">
             <tr>
-              {columns.map((col, idx) => {
+              {activeColumns.map((col, idx) => {
                 const isSortable = !disableSorting && col.sortable !== false && col.accessor;
                 return (
                   <th
@@ -288,7 +348,7 @@ const Table = ({
             )}
             {paginatedData.length === 0 && !isLoading ? (
               <tr>
-                <td colSpan={columns.length} className="text-center py-12 text-(--ink-faint) text-sm">
+                <td colSpan={activeColumns.length} className="text-center py-12 text-(--ink-faint) text-sm">
                   No records matching the selection.
                 </td>
               </tr>
@@ -298,7 +358,7 @@ const Table = ({
                   key={rIdx}
                   className="hover:bg-(--brand-green-soft) transition-colors duration-150"
                 >
-                  {columns.map((col, cIdx) => {
+                  {activeColumns.map((col, cIdx) => {
                     const extraClass = typeof col.cellClassName === 'function'
                       ? col.cellClassName(row, (currentPage - 1) * pageSize + rIdx)
                       : (col.cellClassName || '');
