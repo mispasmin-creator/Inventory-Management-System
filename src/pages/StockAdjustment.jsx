@@ -4,7 +4,7 @@ import { useForm } from 'react-hook-form';
 import GlassCard from '../components/GlassCard';
 import Modal from '../components/Modal';
 import Table from '../components/Table';
-import { TableSkeleton } from '../components/Skeleton';
+
 import { useToast } from '../components/Toast';
 import { useAuth } from '../hooks/useAuth';
 import { supabase } from '../services/supabaseClient';
@@ -57,6 +57,7 @@ const StockAdjustment = () => {
   const [editingAdjustment, setEditingAdjustment] = useState(null);
   const [editingProductRate, setEditingProductRate] = useState(null);
   const [opStockMaterialType, setOpStockMaterialType] = useState('finish_good');
+  const [newProductFormOpen, setNewProductFormOpen] = useState(false);
 
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(100);
@@ -92,7 +93,7 @@ const StockAdjustment = () => {
 
   const visibleTabs = useMemo(() => {
     const allTabs = Object.keys(STOCK_ADJUSTMENT_TAB_KEYS);
-    if (user?.role === 'Admin') return allTabs;
+    if (user?.role === 'Admin') return [...allTabs, 'add_product'];
 
     const pageAccess = user?.page_access || [];
     const hasAnyTabPermissionConfigured = Object.values(STOCK_ADJUSTMENT_TAB_KEYS)
@@ -143,11 +144,32 @@ const StockAdjustment = () => {
     formState: { errors: errorsProductRate }
   } = useForm({ defaultValues: productRateDefaultValues });
 
+  const {
+    register: registerNewProduct,
+    handleSubmit: handleNewProductSubmit,
+    reset: resetNewProduct,
+    watch: watchNewProduct,
+    formState: { errors: errorsNewProduct }
+  } = useForm({ defaultValues: { 
+    firmName: '', 
+    itemName: '', 
+    materialType: 'raw_material',
+    optimum_stock: '',
+    max_stock: '',
+    annu_con: '',
+    unit: '',
+    sf: '',
+    lead_time: ''
+  } });
+
+  const [editingNewProduct, setEditingNewProduct] = useState(null);
+
   const selectedRawFirm = watchRaw('firmName');
   const selectedFinishFirm = watchFinish('firmName');
   const selectedOpStockFirm = watchOpStock('firmName');
   const selectedProductRateFirm = watchProductRate('firmName');
   const selectedProductRateType = watchProductRate('materialType');
+  const selectedNewProductType = watchNewProduct('materialType');
 
   useEffect(() => {
     if (!user) return;
@@ -239,14 +261,21 @@ const StockAdjustment = () => {
     try {
       const query = supabase
         .from('inventory_master')
-        .select('id, firm_name, item_name, op_stock, op_stock_date')
+        .select('id, firm_name, item_name, op_stock, op_stock_date, optimum_qty, max_qty, annu_con, unit, safety_factor, lead_time_days')
         .order('firm_name', { ascending: true })
         .order('item_name', { ascending: true });
       const { data, error } = await restrictQueryToAccessibleFirms(query);
 
       if (error) throw error;
       const rawMaterialRows = (data || [])
-        .map(item => ({ ...item, firm_name: normalizeFirmName(item.firm_name) }))
+        .map(item => ({
+          ...item,
+          firm_name: normalizeFirmName(item.firm_name),
+          optimum_stock: item.optimum_qty,
+          max_stock: item.max_qty,
+          sf: item.safety_factor,
+          lead_time: item.lead_time_days
+        }))
         .filter(item => item.firm_name && item.item_name);
       setRawItemOptions(rawMaterialRows);
       setRawMaterialOpStockRows(rawMaterialRows);
@@ -257,10 +286,10 @@ const StockAdjustment = () => {
 
   const fetchFinishGoodItems = async () => {
     try {
-      const query = supabase
-        .from('finished_goods_inventory_master')
-        .select('id, firm_name, product_name, op_stock, op_stock_date')
-        .order('firm_name', { ascending: true })
+        const query = supabase
+          .from('finished_goods_inventory_master')
+          .select('id, firm_name, product_name, op_stock, op_stock_date')
+          .order('firm_name', { ascending: true })
         .order('product_name', { ascending: true });
       const { data, error } = await restrictQueryToAccessibleFirms(query);
 
@@ -328,6 +357,21 @@ const StockAdjustment = () => {
         material_label: 'Finished Good',
         display_name: row.product_name
       }))
+  ], [finishGoodOpStockRows, rawMaterialOpStockRows]);
+
+  const allProductsRows = useMemo(() => [
+    ...rawMaterialOpStockRows.map(row => ({
+      ...row,
+      material_type: 'raw_material',
+      material_label: 'Raw Material',
+      display_name: row.item_name
+    })),
+    ...finishGoodOpStockRows.map(row => ({
+      ...row,
+      material_type: 'finish_good',
+      material_label: 'Finished Good',
+      display_name: row.product_name
+    }))
   ], [finishGoodOpStockRows, rawMaterialOpStockRows]);
 
   const onRawEntrySubmit = async (data) => {
@@ -504,6 +548,96 @@ const StockAdjustment = () => {
       rate: row.rate
     });
     setProductRateFormOpen(true);
+  };
+
+  const openEditProductForm = (row) => {
+    setEditingNewProduct(row);
+    resetNewProduct({
+      materialType: row.material_type,
+      firmName: row.firm_name,
+      itemName: row.display_name,
+      optimum_stock: row.optimum_stock ?? '',
+      max_stock: row.max_stock ?? '',
+      annu_con: row.annu_con ?? '',
+      unit: row.unit ?? '',
+      sf: row.sf ?? '',
+      lead_time: row.lead_time ?? ''
+    });
+    setNewProductFormOpen(true);
+  };
+
+  const handleDeleteProduct = async (row) => {
+    if (!window.confirm(`Delete product ${row.display_name}? This action cannot be undone.`)) {
+      return;
+    }
+
+    try {
+      const table = row.material_type === 'raw_material' ? 'inventory_master' : 'finished_goods_inventory_master';
+      const { error } = await supabase.from(table).delete().eq('id', row.id);
+
+      if (error) throw error;
+
+      showSuccess('Product deleted successfully.');
+      if (row.material_type === 'raw_material') {
+        await fetchRawMaterialItems();
+      } else {
+        await fetchFinishGoodItems();
+      }
+    } catch (e) {
+      showError(e.message || 'Failed to delete product.');
+    }
+  };
+
+    const onNewProductSubmit = async (data) => {
+      try {
+        const payload = {
+          firm_name: data.firmName,
+          [data.materialType === 'raw_material' ? 'item_name' : 'product_name']: data.itemName,
+          ...(data.materialType === 'raw_material' ? {
+            optimum_qty: data.optimum_stock ? Number(data.optimum_stock) : 0,
+            max_qty: data.max_stock ? Number(data.max_stock) : 0,
+            annu_con: data.annu_con ? Number(data.annu_con) : 0,
+            unit: data.unit || 'MT',
+            safety_factor: data.sf ? Number(data.sf) : 1,
+            lead_time_days: data.lead_time ? Number(data.lead_time) : 0,
+          } : {}),
+          ...(editingNewProduct ? {} : { op_stock: 0, op_stock_date: null })
+        };
+
+        const table = data.materialType === 'raw_material' ? 'inventory_master' : 'finished_goods_inventory_master';
+
+      if (editingNewProduct) {
+        const { error } = await supabase.from(table).update(payload).eq('id', editingNewProduct.id);
+        if (error) throw error;
+        showSuccess('Product updated successfully.');
+      } else {
+        const { error } = await supabase.from(table).insert([payload]);
+        if (error) throw error;
+        showSuccess('Product added successfully.');
+      }
+
+      if (data.materialType === 'raw_material') {
+        await fetchRawMaterialItems();
+      } else {
+        await fetchFinishGoodItems();
+      }
+
+      resetNewProduct({
+        firmName: defaultFirmName, 
+        itemName: '', 
+        materialType: 'raw_material',
+        optimum_stock: '',
+        max_stock: '',
+        annu_con: '',
+        unit: '',
+        sf: '',
+        lead_time: ''
+      });
+      setNewProductFormOpen(false);
+      setEditingNewProduct(null);
+    } catch (e) {
+      showError(e.message || 'Failed to save product.');
+    }
   };
 
   const handleDeleteProductRate = async (row) => {
@@ -1019,6 +1153,30 @@ const StockAdjustment = () => {
               <span>Add Finished Good OP. Stock</span>
             </button>
           </div>
+        ) : activeTab === 'add_product' ? (
+          <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
+            <button
+              onClick={() => {
+                setEditingNewProduct(null);
+                resetNewProduct({ 
+                  firmName: defaultFirmName, 
+                  itemName: '', 
+                  materialType: 'raw_material',
+                  optimum_stock: '',
+                  max_stock: '',
+                  annu_con: '',
+                  unit: '',
+                  sf: '',
+                  lead_time: ''
+                });
+                setNewProductFormOpen(true);
+              }}
+              className="flex items-center justify-center gap-1.5 px-3.5 py-2 text-xs rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-semibold shadow-md transition-colors cursor-pointer"
+            >
+              <Plus className="w-4.5 h-4.5" />
+              <span>Add New Product</span>
+            </button>
+          </div>
         ) : (
           <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
             <button
@@ -1069,7 +1227,20 @@ const StockAdjustment = () => {
                 : 'border-transparent text-slate-500 hover:text-slate-300'
             }`}
           >
-            Products
+            Product Rate
+          </button>
+        )}
+        {visibleTabs.includes('add_product') && (
+          <button
+            type="button"
+            onClick={() => setActiveTab('add_product')}
+            className={`px-4 py-2.5 text-xs font-semibold border-b-2 transition-colors cursor-pointer ${
+              activeTab === 'add_product'
+                ? 'border-amber-500 text-amber-300'
+                : 'border-transparent text-slate-500 hover:text-slate-300'
+            }`}
+          >
+            Add Product
           </button>
         )}
       </div>
@@ -1080,9 +1251,57 @@ const StockAdjustment = () => {
             ? 'Stock Adjustment Entries'
             : activeTab === 'op_stock'
               ? 'Manual OP. Stock Entries'
-              : 'Product Rates'}
+              : activeTab === 'add_product'
+                ? 'Master Products List'
+                : 'Product Rates'}
         </h3>
-        {activeTab === 'op_stock' ? (
+        {activeTab === 'add_product' ? (
+          <Table
+            isLoading={loading}
+            columns={[
+              { header: 'Type', accessor: 'material_label' },
+              { header: 'Firm Name', accessor: 'firm_name', render: (row) => row.firm_name || '-' },
+              { header: 'Item / Product Name', accessor: 'display_name' },
+              { header: 'Optimum Qty', accessor: 'optimum_stock', render: (row) => row.optimum_stock || '-' },
+              { header: 'Max Qty', accessor: 'max_stock', render: (row) => row.max_stock || '-' },
+              { header: 'Annual Cons.', accessor: 'annu_con', render: (row) => row.annu_con || '-' },
+              { header: 'Unit', accessor: 'unit', render: (row) => row.unit || '-' },
+              { header: 'Safety Factor', accessor: 'sf', render: (row) => row.sf || '-' },
+              { header: 'Lead Time', accessor: 'lead_time', render: (row) => row.lead_time || '-' },
+              {
+                header: 'Action',
+                accessor: '',
+                sortable: false,
+                render: (row) => (
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => openEditProductForm(row)}
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-indigo-600/20 text-indigo-300 hover:bg-indigo-600 hover:text-white transition-colors cursor-pointer"
+                    >
+                      <Edit3 className="w-3.5 h-3.5" />
+                      Edit
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteProduct(row)}
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-rose-600/20 text-red-600 hover:bg-rose-600 hover:text-white transition-colors cursor-pointer"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      Delete
+                    </button>
+                  </div>
+                )
+              }
+            ]}
+            data={allProductsRows}
+            searchPlaceholder="Search products..."
+            filterKey="material_type"
+            filterOptions={['raw_material', 'finish_good']}
+            filterPlaceholder="Filter Type"
+            exportFileName="master_products"
+          />
+        ) : activeTab === 'op_stock' ? (
           <Table
             isLoading={loading}
             columns={opStockColumns}
@@ -1220,6 +1439,149 @@ const StockAdjustment = () => {
           lockItemSelection: Boolean(editingOpStockRow),
           minimumQuantity: 0
         })}
+      </Modal>
+
+      <Modal
+        isOpen={newProductFormOpen}
+        onClose={() => {
+          setNewProductFormOpen(false);
+          setEditingNewProduct(null);
+        }}
+        title={editingNewProduct ? "Edit Product" : "Add New Product"}
+      >
+        <form onSubmit={handleNewProductSubmit(onNewProductSubmit)} className="space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="space-y-1">
+              <label className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider pl-0.5">Type <span className="text-red-500">*</span></label>
+              <select
+                {...registerNewProduct('materialType', { required: true })}
+                disabled={Boolean(editingNewProduct)}
+                className="w-full px-3 py-2.5 text-xs rounded-lg glass-input bg-slate-900"
+              >
+                <option value="raw_material">Raw Material</option>
+                <option value="finish_good">Finished Good</option>
+              </select>
+            </div>
+            
+            <div className="space-y-1">
+              <label className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider pl-0.5">Firm Name <span className="text-red-500">*</span></label>
+              <select
+                {...registerNewProduct('firmName', { required: 'Firm name is required' })}
+                disabled={Boolean(editingNewProduct)}
+                className="w-full px-3 py-2.5 text-xs rounded-lg glass-input bg-slate-900"
+              >
+                <option value="">Select firm...</option>
+                {accessibleFirms.map(firmName => (
+                  <option key={firmName} value={firmName}>{firmName}</option>
+                ))}
+              </select>
+              {errorsNewProduct.firmName && <span className="text-[10px] text-rose-400 font-medium">{errorsNewProduct.firmName.message}</span>}
+            </div>
+
+            <div className="space-y-1 sm:col-span-2">
+              <label className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider pl-0.5">Item / Product Name <span className="text-red-500">*</span></label>
+              <input
+                type="text"
+                placeholder="Enter item or product name"
+                {...registerNewProduct('itemName', { required: 'Name is required' })}
+                className="w-full px-3 py-2.5 text-xs rounded-lg glass-input"
+              />
+              {errorsNewProduct.itemName && <span className="text-[10px] text-rose-400 font-medium">{errorsNewProduct.itemName.message}</span>}
+            </div>
+
+            {selectedNewProductType === 'raw_material' && (
+              <>
+                <div className="space-y-1">
+                  <label className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider pl-0.5">Optimum Qty</label>
+                  <input
+                    type="number"
+                    step="any"
+                    placeholder="0"
+                    {...registerNewProduct('optimum_stock')}
+                    className="w-full px-3 py-2.5 text-xs rounded-lg glass-input"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider pl-0.5">Max Qty</label>
+                  <input
+                    type="number"
+                    step="any"
+                    placeholder="0"
+                    {...registerNewProduct('max_stock')}
+                    className="w-full px-3 py-2.5 text-xs rounded-lg glass-input"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider pl-0.5">Annual Consumption</label>
+                  <input
+                    type="number"
+                    step="any"
+                    placeholder="0"
+                    {...registerNewProduct('annu_con')}
+                    className="w-full px-3 py-2.5 text-xs rounded-lg glass-input"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider pl-0.5">Unit <span className="text-red-500">*</span></label>
+                  <select
+                    {...registerNewProduct('unit')}
+                    className="w-full px-3 py-2.5 text-xs rounded-lg glass-input bg-slate-900"
+                  >
+                    <option value="">Select Unit...</option>
+                    <option value="MT">MT</option>
+                    <option value="KGS">KGS</option>
+                    <option value="LITER">LITER</option>
+                    <option value="PCS">PCS</option>
+                  </select>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider pl-0.5">Safety Factor</label>
+                  <input
+                    type="number"
+                    step="any"
+                    placeholder="0"
+                    {...registerNewProduct('sf')}
+                    className="w-full px-3 py-2.5 text-xs rounded-lg glass-input"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider pl-0.5">Lead Time (Days)</label>
+                  <input
+                    type="number"
+                    step="any"
+                    placeholder="0"
+                    {...registerNewProduct('lead_time')}
+                    className="w-full px-3 py-2.5 text-xs rounded-lg glass-input"
+                  />
+                </div>
+              </>
+            )}
+          </div>
+
+          <div className="pt-3 border-t border-slate-800 flex justify-end gap-3 text-xs">
+            <button
+              type="button"
+              onClick={() => {
+                setNewProductFormOpen(false);
+                setEditingNewProduct(null);
+              }}
+              className="px-4 py-2.5 rounded-lg bg-slate-800 text-slate-400 hover:text-slate-200 cursor-pointer"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="px-4 py-2.5 rounded-lg bg-indigo-600 text-white font-semibold hover:bg-indigo-500 cursor-pointer"
+            >
+              {editingNewProduct ? 'Update Product' : 'Add Product'}
+            </button>
+          </div>
+        </form>
       </Modal>
     </div>
   );
