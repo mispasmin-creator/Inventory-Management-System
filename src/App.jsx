@@ -16,6 +16,7 @@ import PmmplRate from './pages/PmmplRate';
 import Reports from './pages/Reports';
 import Settings from './pages/Settings';
 import StockAdjustment from './pages/StockAdjustment';
+import History from './pages/History';
 
 // Route Guard for Protected Pages
 const ProtectedRoute = ({ children }) => {
@@ -59,6 +60,7 @@ const AppLayout = () => {
             <Route path="/pmmpl-rates" element={<PmmplRate />} />
             <Route path="/reports" element={<Reports />} />
             <Route path="/stock-adjustment" element={<StockAdjustment />} />
+            <Route path="/history" element={<History />} />
             <Route path="/settings" element={<Settings />} />
             {/* Fallback to Dashboard */}
             <Route path="*" element={<Navigate to="/" replace />} />

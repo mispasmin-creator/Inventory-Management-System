@@ -26,6 +26,7 @@ import {
   Cog,
   PackageOpen,
   SlidersHorizontal,
+  History as HistoryIcon,
 } from 'lucide-react';
 
 // Page access groups — each with sub-pages
@@ -69,6 +70,7 @@ const ALL_PAGE_GROUPS = [
   { group: null, pages: [
     { key: 'Settings',  label: 'System Settings',  icon: Cog },
     { key: 'Dashboard', label: 'Dashboard',        icon: LayoutDashboard },
+    { key: 'History',   label: 'Stock History',    icon: HistoryIcon },
   ]},
 ];
 

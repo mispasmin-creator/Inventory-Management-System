@@ -6,6 +6,7 @@ import {
   SlidersHorizontal,
   Settings,
   Package,
+  History,
 } from "lucide-react";
 import { useAuth } from "../hooks/useAuth";
 
@@ -72,6 +73,7 @@ const TopNav = () => {
     { title: "Raw Material",    path: "/raw-material",   icon: Building2 },
     { title: "Finished Good",   path: "/finished-good",  icon: Package },
     { title: "Stock Adjustment",path: "/stock-adjustment",icon: SlidersHorizontal },
+    { title: "History",         path: "/history",        icon: History },
     { title: "System Settings", path: "/settings",       icon: Settings },
   ];
 
@@ -83,6 +85,7 @@ const TopNav = () => {
       "Raw Material":   null,
       "Finished Good":  null,
       "Stock Adjustment": "StockAdjustment",
+      History:            "History",
       "System Settings":  "Settings",
     };
     if (item.title === "Raw Material")    return accessibleBranches.length > 0;
