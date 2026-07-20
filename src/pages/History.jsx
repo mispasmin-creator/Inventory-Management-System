@@ -9,18 +9,9 @@ import { supabase } from '../services/supabaseClient';
 const branchOptions = ['Purab', 'Pmmpl', 'Rkl'];
 const PAGE_SIZE = 1000;
 
-const toDateString = (d) => {
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, '0');
-  const dd = String(d.getDate()).padStart(2, '0');
-  return `${yyyy}-${mm}-${dd}`;
-};
-
-// A snapshot can never be newer than today, so nothing beyond it is selectable.
-const getMaxDate = () => toDateString(new Date());
-
 // '2026-07-17' -> '17/07/2026' for the column header.
 const toDisplayDate = (isoDate) => {
+  if (!isoDate) return '';
   const [yyyy, mm, dd] = String(isoDate).split('-');
   return `${dd}/${mm}/${yyyy}`;
 };
@@ -85,16 +76,15 @@ const FINISH_LEGEND = [
 const History = () => {
   const { showError } = useToast();
   const [activeTab, setActiveTab] = useState('raw_material');
-  const [selectedDate, setSelectedDate] = useState('');
-  const [latestDate, setLatestDate] = useState('');
   const [rawRows, setRawRows] = useState([]);
+  const [rawDates, setRawDates] = useState([]);
   const [finishRows, setFinishRows] = useState([]);
+  const [finishDates, setFinishDates] = useState([]);
   const [loading, setLoading] = useState(true);
 
   const isFinishGood = activeTab === 'finish_good';
 
-  const fetchHistory = useCallback(async (date) => {
-    if (!date) return;
+  const fetchHistory = useCallback(async () => {
     setLoading(true);
     try {
       const readAll = async (table, columns, orderColumn) => {
@@ -103,9 +93,9 @@ const History = () => {
           const { data, error } = await supabase
             .from(table)
             .select(columns)
-            .eq('snapshot_date', date)
             .order('firm_name', { ascending: true })
             .order(orderColumn, { ascending: true })
+            .order('snapshot_date', { ascending: true })
             .range(from, from + PAGE_SIZE - 1);
 
           if (error) throw error;
@@ -118,34 +108,47 @@ const History = () => {
       const [raw, finish] = await Promise.all([
         readAll(
           'inventory_master_history',
-          'firm_name, item_name, unit, actual_level, optimum_qty, max_qty',
+          'firm_name, item_name, unit, actual_level, optimum_qty, max_qty, snapshot_date',
           'item_name',
         ),
         readAll(
           'finished_goods_inventory_history',
-          'firm_name, product_name, current_level, sales_order_pending',
+          'firm_name, product_name, current_level, sales_order_pending, snapshot_date',
           'product_name',
         ),
       ]);
 
-      setRawRows(raw.map((row, index) => ({
-        s_no: index + 1,
-        firm_name: row.firm_name,
-        item_name: row.item_name,
-        unit: row.unit || '',
-        value: row.actual_level,
-        optimum_qty: row.optimum_qty,
-        max_qty: row.max_qty,
-      })));
+      const processData = (data, nameField, levelField, extraFields) => {
+        const map = new Map();
+        const dates = new Set();
+        data.forEach(row => {
+          if (row.snapshot_date) {
+            dates.add(row.snapshot_date);
+            const key = `${row.firm_name}_${row[nameField]}`;
+            if (!map.has(key)) {
+               map.set(key, {
+                  firm_name: row.firm_name,
+                  item_name: row[nameField],
+                  ...extraFields.reduce((acc, f) => ({ ...acc, [f]: row[f] }), {}),
+               });
+            }
+            map.get(key)[row.snapshot_date] = row[levelField];
+          }
+        });
+        const datesArray = Array.from(dates).sort();
+        return {
+          dates: datesArray,
+          rows: Array.from(map.values()).map((item, index) => ({ s_no: index + 1, ...item }))
+        };
+      };
 
-      setFinishRows(finish.map((row, index) => ({
-        s_no: index + 1,
-        firm_name: row.firm_name,
-        item_name: row.product_name,
-        unit: '',
-        value: row.current_level,
-        sales_order_pending: row.sales_order_pending,
-      })));
+      const rawProcessed = processData(raw, 'item_name', 'actual_level', ['unit', 'optimum_qty', 'max_qty']);
+      setRawDates(rawProcessed.dates);
+      setRawRows(rawProcessed.rows);
+
+      const finishProcessed = processData(finish, 'product_name', 'current_level', ['sales_order_pending']);
+      setFinishDates(finishProcessed.dates);
+      setFinishRows(finishProcessed.rows);
     } catch (e) {
       showError(e.message || 'Failed to load history.');
       setRawRows([]);
@@ -155,71 +158,41 @@ const History = () => {
     }
   }, [showError]);
 
-  // Land on the newest snapshot that exists rather than assuming yesterday, so
-  // the page still shows data if a night was missed.
   useEffect(() => {
-    let cancelled = false;
+    fetchHistory();
+  }, [fetchHistory]);
 
-    const loadLatestDate = async () => {
-      try {
-        const newestOf = async (table) => {
-          const { data, error } = await supabase
-            .from(table)
-            .select('snapshot_date')
-            .order('snapshot_date', { ascending: false })
-            .limit(1);
-          if (error) throw error;
-          return data?.[0]?.snapshot_date || '';
-        };
+  const activeDates = isFinishGood ? finishDates : rawDates;
 
-        const dates = (await Promise.all([
-          newestOf('inventory_master_history'),
-          newestOf('finished_goods_inventory_history'),
-        ])).filter(Boolean);
+  const columns = useMemo(() => {
+    const baseColumns = [
+      { header: 'S.No.', accessor: 's_no', sortable: false },
+      { header: 'Firm Name', accessor: 'firm_name' },
+      { header: isFinishGood ? 'Product Name' : 'Item Name', accessor: 'item_name' },
+      { header: 'Unit', accessor: 'unit', render: (row) => row.unit || '-' },
+    ];
 
-        if (cancelled) return;
-        const newest = dates.sort().pop() || '';
-        setLatestDate(newest);
-        setSelectedDate(newest);
-        if (!newest) setLoading(false);
-      } catch (e) {
-        if (cancelled) return;
-        showError(e.message || 'Failed to find the latest history date.');
-        setLoading(false);
-      }
-    };
-
-    loadLatestDate();
-    return () => { cancelled = true; };
-  }, [showError]);
-
-  useEffect(() => {
-    if (selectedDate) fetchHistory(selectedDate);
-  }, [selectedDate, fetchHistory]);
-
-  const columns = useMemo(() => [
-    { header: 'S.No.', accessor: 's_no', sortable: false },
-    { header: 'Firm Name', accessor: 'firm_name' },
-    { header: isFinishGood ? 'Product Name' : 'Item Name', accessor: 'item_name' },
-    { header: 'Unit', accessor: 'unit', render: (row) => row.unit || '-' },
-    {
-      header: selectedDate ? toDisplayDate(selectedDate) : 'Stock',
-      accessor: 'value',
+    const dateCols = activeDates.map(date => ({
+      header: toDisplayDate(date),
+      accessor: date,
       cellClassName: (row) => {
-        if (row.value === null || row.value === undefined || row.value === '') return '';
+        const value = row[date];
+        if (value === null || value === undefined || value === '') return '';
         if (isFinishGood) {
-          return Number(row.value) < Number(row.sales_order_pending || 0)
+          return Number(value) < Number(row.sales_order_pending || 0)
             ? 'bg-gradient-to-r from-red-500/95 to-rose-600/95 text-white font-bold'
             : 'bg-gradient-to-r from-emerald-500/95 to-teal-600/95 text-white font-bold';
         }
-        return RAW_STATUS_CLASS[getRawStatus(row.value, row.optimum_qty, row.max_qty)] || '';
+        return RAW_STATUS_CLASS[getRawStatus(value, row.optimum_qty, row.max_qty)] || '';
       },
-      render: (row) => formatNumber(row.value),
-    },
-  ], [isFinishGood, selectedDate]);
+      render: (row) => formatNumber(row[date]),
+    }));
+
+    return [...baseColumns, ...dateCols];
+  }, [isFinishGood, activeDates]);
 
   const activeRows = isFinishGood ? finishRows : rawRows;
-  const isLatestDate = !latestDate || selectedDate === latestDate;
+  const hasHistory = activeDates.length > 0;
 
   return (
     <div className="space-y-5">
@@ -232,28 +205,6 @@ const History = () => {
               {isFinishGood ? 'Current Level' : 'Actual Level'} as captured automatically at 12 AM.
             </p>
           </div>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <div className="relative">
-            <Calendar className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-(--ink-faint) pointer-events-none" />
-            <input
-              type="date"
-              value={selectedDate}
-              max={getMaxDate()}
-              onChange={(e) => setSelectedDate(e.target.value)}
-              className="pl-8 pr-3 py-2.5 text-xs rounded-xl glass-input font-medium cursor-pointer"
-            />
-          </div>
-          {!isLatestDate && (
-            <button
-              type="button"
-              onClick={() => setSelectedDate(latestDate)}
-              className="px-3 py-2.5 text-xs rounded-xl glass-input font-medium cursor-pointer hover:bg-(--surface-mid) transition-colors"
-            >
-              Latest
-            </button>
-          )}
         </div>
       </div>
 
@@ -287,16 +238,11 @@ const History = () => {
       <GlassCard className="p-2 sm:p-6">
         <h3 className="text-sm font-bold text-(--ink) mb-4">
           {isFinishGood ? 'Finished Good History' : 'Raw Material History'}
-          {selectedDate && (
-            <span className="ml-2 text-[11px] font-medium text-(--ink-faint)">
-              {toDisplayDate(selectedDate)}{isLatestDate && latestDate ? ' (latest)' : ''}
-            </span>
-          )}
         </h3>
 
         {loading && activeRows.length === 0 ? (
           <TableSkeleton />
-        ) : !latestDate ? (
+        ) : !hasHistory ? (
           <div className="text-center py-12 text-(--ink-faint) text-sm">
             No history captured yet. The first snapshot runs tonight at 12 AM.
           </div>
@@ -312,8 +258,8 @@ const History = () => {
             filterPlaceholder="Filter Firm"
             exportFileName={
               isFinishGood
-                ? `finished_good_history_${selectedDate}`
-                : `raw_material_history_${selectedDate}`
+                ? `finished_good_history`
+                : `raw_material_history`
             }
           />
         )}
