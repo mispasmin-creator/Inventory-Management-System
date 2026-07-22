@@ -239,6 +239,7 @@ const buildSemiFinishedActualLevelMap = async (selectedDate = '') => {
   const semiGrainsMap = {};
   const semiFinesMap = {};
   const semiRawConsumptionMap = {};
+  const semiProductRateMap = {};
 
   try {
     for (let from = 0; ; from += pageSize) {
@@ -263,6 +264,7 @@ const buildSemiFinishedActualLevelMap = async (selectedDate = '') => {
       const { data, error } = await productionSupabase
         .from('semi_actual')
         .select('*')
+        .order('id', { ascending: false })
         .range(from, from + pageSize - 1);
 
       if (error) throw error;
@@ -278,6 +280,14 @@ const buildSemiFinishedActualLevelMap = async (selectedDate = '') => {
         const productKey = normalizeItemKey(productName);
         const productionKey = `${row['Semi Finished Production No.']}::${productKey}`;
         const firmKey = normalizeFirmKey(normalizeProductionFirmName(productionFirmMap.get(productionKey)));
+        
+        if (firmKey && productKey) {
+          const key = `${firmKey}::${productKey}`;
+          if (semiProductRateMap[key] === undefined && row['Product Rate'] != null && Number(row['Product Rate']) > 0) {
+            semiProductRateMap[key] = Number(row['Product Rate']);
+          }
+        }
+
         const rawQuantity = row['Qty Of Semi Finished Good'];
         const quantity = Number(rawQuantity);
         if (!firmKey || rawQuantity === null || rawQuantity === '' || !Number.isFinite(quantity)) return;
@@ -319,7 +329,7 @@ const buildSemiFinishedActualLevelMap = async (selectedDate = '') => {
     console.warn('Supabase semi finished actual sync failed:', error.message);
   }
 
-  return { semiAdjustmentMap, semiGrainsMap, semiFinesMap, semiRawConsumptionMap };
+  return { semiAdjustmentMap, semiGrainsMap, semiFinesMap, semiRawConsumptionMap, semiProductRateMap };
 };
 
 const buildCrushingActualLevelMap = async (selectedDate = '') => {
@@ -1050,7 +1060,7 @@ const buildLiftDataMaps = async (selectedDate = '') => {
 
     const [
       { usageMap: productionUsageMap, annualUsageMap: annualProductionUsageMap },
-      { semiAdjustmentMap, semiGrainsMap, semiFinesMap, semiRawConsumptionMap },
+      { semiAdjustmentMap, semiGrainsMap, semiFinesMap, semiRawConsumptionMap, semiProductRateMap },
       { crushingAdjustmentMap, crushingGrainsMap, crushingFinesMap, crushingLumpsMap, crushingOutputsMap }
     ] = await Promise.all([
       buildProductionUsageMap(selectedDate),
@@ -1102,7 +1112,8 @@ const buildLiftDataMaps = async (selectedDate = '') => {
       crushingGrainsMap,
       crushingFinesMap,
       crushingLumpsMap,
-      crushingOutputsMap
+      crushingOutputsMap,
+      semiProductRateMap
     };
   } catch (error) {
     console.warn('Supabase purchase tables data sync failed:', error.message);
@@ -1120,7 +1131,8 @@ const buildLiftDataMaps = async (selectedDate = '') => {
       crushingGrainsMap: {},
       crushingFinesMap: {},
       crushingLumpsMap: {},
-      crushingOutputsMap: {}
+      crushingOutputsMap: {},
+      semiProductRateMap: {}
     };
   }
 };
@@ -1292,7 +1304,8 @@ export const apiService = {
           crushingGrainsMap,
           crushingFinesMap,
           crushingLumpsMap,
-          crushingOutputsMap
+          crushingOutputsMap,
+          semiProductRateMap
         },
         productTabRateMap,
         salesRawOrdersResult
@@ -1335,9 +1348,20 @@ export const apiService = {
       const inventoryRows = mergeDuplicateInventoryRows((data || [])
         .map((item, index) => {
           const key = `${normalizeFirmKey(item.firm_name)}::${normalizeItemKey(item.item_name)}`;
-          const baseRate = poRatesMap[key] !== undefined
-            ? poRatesMap[key]
-            : (productTabRateMap[key] !== undefined ? productTabRateMap[key] : (item.product_rate ?? ''));
+          const poRateValue = poRatesMap[key];
+          const semiRateValue = semiProductRateMap[key];
+
+          let baseRate;
+          let isProductionEntryRate = false;
+
+          if (poRateValue !== undefined) {
+            baseRate = poRateValue;
+          } else if (semiRateValue !== undefined) {
+            baseRate = semiRateValue;
+            isProductionEntryRate = true;
+          } else {
+            baseRate = productTabRateMap[key] !== undefined ? productTabRateMap[key] : (item.product_rate ?? '');
+          }
           const transRate = transportingRatesMap[key] || 0;
           let rate = baseRate;
           if (rate !== '') {
@@ -1383,6 +1407,7 @@ export const apiService = {
             actual_level: actualLevel,
             product_rate: rate,
             material_rate: baseRate,
+            is_production_entry_rate: isProductionEntryRate,
             transportation_rate: transportingRatesMap[key] !== undefined ? transportingRatesMap[key] : 0,
             optimum_stock_total: calculatedOptimumTotal,
             stock_total: calculatedStockTotal,

@@ -86,6 +86,8 @@ const BranchInventory = () => {
   const [transferRequests, setTransferRequests] = useState([]);
   const [transfersLoading, setTransfersLoading] = useState(false);
   const [rawFactoryEntries, setRawFactoryEntries] = useState([]);
+  // Crushing actual processing cost map: key = "firmLower::fgNameLower" → cost
+  const [crushingCostMap, setCrushingCostMap] = useState({});
 
   // Forms
   const { register: regAdd, handleSubmit: handleAddSubmit, reset: resetAdd, control: addControl, setValue: setAddValue, formState: { errors: errorsAdd } } = useForm();
@@ -186,6 +188,7 @@ const BranchInventory = () => {
   useEffect(() => {
     if (type !== 'raw_material') return;
     fetchRawFactoryEntries();
+    fetchCrushingRates();
   }, [type]);
 
   const addOptimumStock = useWatch({ control: addControl, name: 'optimum_stock' });
@@ -237,6 +240,35 @@ const BranchInventory = () => {
       console.error('Failed to load transfers:', e);
     } finally {
       setTransfersLoading(false);
+    }
+  };
+
+  // Fetch Processing Cost from crushing_actual (production DB) grouped by firm + fg name
+  const fetchCrushingRates = async () => {
+    try {
+      const { data, error } = await productionSupabase
+        .from('crushing_actual')
+        .select('"Firm Name", "Finished Goods Name 1", "Processing Cost 1", "Finished Goods Name 2", "Processing Cost 2", "Finished Goods Name 3", "Processing Cost 3", "Finished Goods Name 4", "Processing Cost 4"');
+      if (error) throw error;
+      const map = {};
+      (data || []).forEach(row => {
+        const firm = (row['Firm Name'] || '').trim().toLowerCase();
+        [
+          [row['Finished Goods Name 1'], row['Processing Cost 1']],
+          [row['Finished Goods Name 2'], row['Processing Cost 2']],
+          [row['Finished Goods Name 3'], row['Processing Cost 3']],
+          [row['Finished Goods Name 4'], row['Processing Cost 4']],
+        ].forEach(([name, cost]) => {
+          if (name && cost != null && Number(cost) > 0) {
+            const key = `${firm}::${name.trim().toLowerCase()}`;
+            // Keep the latest non-zero cost for each firm+fg combination
+            map[key] = Number(cost);
+          }
+        });
+      });
+      setCrushingCostMap(map);
+    } catch (e) {
+      console.error('Failed to fetch crushing rates:', e);
     }
   };
 
@@ -551,18 +583,35 @@ const BranchInventory = () => {
     {
       header: 'Product Rate',
       accessor: 'product_rate',
-      render: (row) => (
-        <button
-          onClick={() => {
-            setRateBreakdownItem(row);
-            setRateBreakdownModalOpen(true);
-          }}
-          className="text-indigo-400 hover:text-indigo-300 font-semibold cursor-pointer focus:outline-none"
-          title="Click to see rate breakdown"
-        >
-          {renderRawCurrency(row.product_rate)}
-        </button>
-      )
+      render: (row) => {
+        // Crushing actual rate has first priority; fall back to stored product_rate
+        const hasCrushingRate = row.crushing_product_rate != null && row.crushing_product_rate > 0;
+        const baseRate = hasCrushingRate ? Number(row.crushing_product_rate) : Number(row.product_rate || 0);
+        
+        let displayRate = baseRate;
+        const hasExtraRate = row.added_extra_rate != null && row.added_extra_rate > 0;
+        if (hasExtraRate) {
+          displayRate += row.added_extra_rate;
+        }
+
+        let titleStr = hasCrushingRate ? `Crushing Processing Cost: ₹${row.crushing_product_rate}` : 'Click to see rate breakdown';
+        if (hasExtraRate) {
+          titleStr += ` | + ${row.added_extra_label} Rate: ₹${row.added_extra_rate}`;
+        }
+
+        return (
+          <button
+            onClick={() => {
+              setRateBreakdownItem(row);
+              setRateBreakdownModalOpen(true);
+            }}
+            className="text-indigo-400 hover:text-indigo-300 font-semibold cursor-pointer focus:outline-none flex flex-col items-center gap-0.5"
+            title={titleStr}
+          >
+            <span>{renderRawCurrency(displayRate)}</span>
+          </button>
+        );
+      }
     },
     { header: 'Optimum Stock Total', accessor: 'optimum_stock_total', render: (row) => renderRawCurrency(row.optimum_stock_total) },
     { header: 'Stock Total', accessor: 'stock_total', render: (row) => renderRawCurrency(row.stock_total) },
@@ -667,16 +716,50 @@ const BranchInventory = () => {
         status = item.colour || '';
       }
 
+      // Crushing actual processing cost: match firm + item name strictly to finished goods in crushing_actual
+      const crushingRate = (() => {
+        if (!firmKey || !itemKey) return null;
+        const directKey = `${firmKey}::${itemKey}`;
+        return crushingCostMap[directKey] != null ? crushingCostMap[directKey] : null;
+      })();
+
+      const baseProductRate = crushingRate != null && crushingRate > 0 ? crushingRate : Number(item.product_rate || 0);
+      let extraRate = 0;
+      let extraLabel = '';
+      
+      if (baseProductRate > 0) {
+        if (['insulator (0-1)', 'insulator (1-3)', 'insulator (3-5)', 'insulator grains'].includes(itemKey)) {
+          const lumpsItem = inventoryItems.find(
+            (i) => i.firm_name?.trim().toLowerCase() === firmKey && i.item_name?.trim().toLowerCase() === 'insulator lumps'
+          );
+          if (lumpsItem) {
+            extraRate = Number(lumpsItem.product_rate) || 0;
+            extraLabel = 'Lumps';
+          }
+        } else if (['ferro chrome (0-1)', 'ferro chrome (1-3)', 'ferro chrome (3-5)'].includes(itemKey)) {
+          const slagItem = inventoryItems.find(
+            (i) => i.firm_name?.trim().toLowerCase() === firmKey && i.item_name?.trim().toLowerCase() === 'ferro chrome slag'
+          );
+          if (slagItem) {
+            extraRate = Number(slagItem.product_rate) || 0;
+            extraLabel = 'Slag';
+          }
+        }
+      }
+
       return {
         ...item,
         stock_adjustment: firmAdjustmentTotal + legacyAdjustmentTotal,
         actual_level: adjustedActualLevel,
         d_con: calculatedDCon,
         colour: status,
-        colour_group: getColourForStatus(status)
+        colour_group: getColourForStatus(status),
+        crushing_product_rate: crushingRate,
+        added_extra_rate: extraRate,
+        added_extra_label: extraLabel,
       };
     });
-  }, [inventoryItems, rawFactoryEntries, type]);
+  }, [inventoryItems, rawFactoryEntries, crushingCostMap, type]);
 
   const displayedInventoryItems = React.useMemo(() => {
     const filtered = (processedInventoryItems || []).filter(item => {
@@ -1430,7 +1513,9 @@ const BranchInventory = () => {
 
           <div className="grid grid-cols-2 gap-y-4 gap-x-6 py-2">
             <div>
-              <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Product Rate</div>
+              <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
+                {rateBreakdownItem?.is_production_entry_rate ? 'Production Entry Rate' : 'Product Rate'}
+              </div>
               <div className="text-sm font-bold text-slate-100 mt-1">
                 {renderRawCurrency(rateBreakdownItem?.material_rate)}
               </div>
@@ -1441,13 +1526,35 @@ const BranchInventory = () => {
                 {renderRawCurrency(rateBreakdownItem?.transportation_rate)}
               </div>
             </div>
+            {rateBreakdownItem?.crushing_product_rate != null && rateBreakdownItem?.crushing_product_rate > 0 && (
+              <div>
+                <div className="text-[10px] font-semibold text-emerald-400 uppercase tracking-wider">Crushing Processing Cost</div>
+                <div className="text-sm font-bold text-emerald-300 mt-1">
+                  {renderRawCurrency(rateBreakdownItem?.crushing_product_rate)}
+                </div>
+              </div>
+            )}
+            {rateBreakdownItem?.added_extra_rate != null && rateBreakdownItem?.added_extra_rate > 0 && (
+              <div>
+                <div className="text-[10px] font-semibold text-amber-500 uppercase tracking-wider">Added {rateBreakdownItem.added_extra_label} Rate</div>
+                <div className="text-sm font-bold text-amber-400 mt-1">
+                  {renderRawCurrency(rateBreakdownItem?.added_extra_rate)}
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="pt-4 border-t border-slate-800 flex items-center justify-between">
             <div>
               <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Total Product Rate</div>
               <div className="text-lg font-black text-emerald-400 mt-1">
-                {renderRawCurrency(rateBreakdownItem?.product_rate)}
+                {(() => {
+                  const hasCrushingRate = rateBreakdownItem?.crushing_product_rate != null && rateBreakdownItem?.crushing_product_rate > 0;
+                  const baseRate = hasCrushingRate ? Number(rateBreakdownItem.crushing_product_rate) : Number(rateBreakdownItem?.product_rate || 0);
+                  const hasExtraRate = rateBreakdownItem?.added_extra_rate != null && rateBreakdownItem?.added_extra_rate > 0;
+                  const displayRate = baseRate + (hasExtraRate ? Number(rateBreakdownItem.added_extra_rate) : 0);
+                  return renderRawCurrency(displayRate);
+                })()}
               </div>
             </div>
             <button
