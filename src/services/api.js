@@ -25,6 +25,7 @@ const client = axios.create({
 const normalizeFirmKey = (value) =>
   String(value || '')
     .toLowerCase()
+    .replace(/pmmpl\s*order/g, 'pmmpl')
     .replace(/pmmpl|madhya/g, 'pmmpl')
     .replace(/[^a-z0-9]/g, '');
 
@@ -238,8 +239,10 @@ const buildSemiFinishedActualLevelMap = async (selectedDate = '') => {
   const semiAdjustmentMap = {};
   const semiGrainsMap = {};
   const semiFinesMap = {};
+  const semiGreenMap = {};
+  const semiClinkerMap = {};
   const semiRawConsumptionMap = {};
-  const semiProductRateMap = {};
+  const latestSemiComponentsMap = {};
 
   try {
     for (let from = 0; ; from += pageSize) {
@@ -280,14 +283,6 @@ const buildSemiFinishedActualLevelMap = async (selectedDate = '') => {
         const productKey = normalizeItemKey(productName);
         const productionKey = `${row['Semi Finished Production No.']}::${productKey}`;
         const firmKey = normalizeFirmKey(normalizeProductionFirmName(productionFirmMap.get(productionKey)));
-        
-        if (firmKey && productKey) {
-          const key = `${firmKey}::${productKey}`;
-          if (semiProductRateMap[key] === undefined && row['Product Rate'] != null && Number(row['Product Rate']) > 0) {
-            semiProductRateMap[key] = Number(row['Product Rate']);
-          }
-        }
-
         const rawQuantity = row['Qty Of Semi Finished Good'];
         const quantity = Number(rawQuantity);
         if (!firmKey || rawQuantity === null || rawQuantity === '' || !Number.isFinite(quantity)) return;
@@ -304,22 +299,46 @@ const buildSemiFinishedActualLevelMap = async (selectedDate = '') => {
           }
         }
 
-        // Semi finished output adjustment (only for fines/grains products)
+        // Semi finished output adjustment: Product Name column is produced output (+)
         if (!productKey) return;
         const productText = String(productName || '').toLowerCase();
-        const signedQuantity = productText.includes('grains')
-          ? -quantity
-          : productText.includes('fines')
-            ? quantity
-            : 0;
-        if (signedQuantity === 0) return;
+        const signedQuantity = quantity;
+        if (!Number.isFinite(signedQuantity) || signedQuantity <= 0) return;
 
         const key = `${firmKey}::${productKey}`;
+        if (!latestSemiComponentsMap[key]) {
+          latestSemiComponentsMap[key] = { components: [], processingCost: 0 };
+        }
+        if (!latestSemiComponentsMap[key].processingCost && row['Processing Cost']) {
+          latestSemiComponentsMap[key].processingCost = Number(row['Processing Cost']);
+        }
+        if (latestSemiComponentsMap[key].components.length === 0) {
+          const components = [];
+          for (let i = 1; i <= 5; i++) {
+            const rmName = row[`Raw Material Name ${i}`];
+            const rmKey = normalizeItemKey(rmName);
+            const rmQtyRaw = row[`Quantity Of Raw Material ${i}`];
+            const rmQty = Number(rmQtyRaw);
+            if (rmKey && rmQtyRaw !== null && rmQtyRaw !== '' && Number.isFinite(rmQty) && rmQty > 0) {
+              components.push({ rmKey, qty: rmQty });
+            }
+          }
+          if (components.length > 0) {
+            latestSemiComponentsMap[key].components = components;
+          }
+        }
+
         semiAdjustmentMap[key] = (semiAdjustmentMap[key] || 0) + signedQuantity;
-        if (productText.includes('grains')) {
-          semiGrainsMap[key] = (semiGrainsMap[key] || 0) + signedQuantity;
+        if (productText.includes('green')) {
+          semiGreenMap[key] = (semiGreenMap[key] || 0) + signedQuantity;
+        } else if (productText.includes('clinker')) {
+          semiClinkerMap[key] = (semiClinkerMap[key] || 0) + signedQuantity;
         } else if (productText.includes('fines')) {
           semiFinesMap[key] = (semiFinesMap[key] || 0) + signedQuantity;
+        } else if (productText.includes('grains')) {
+          semiGrainsMap[key] = (semiGrainsMap[key] || 0) + signedQuantity;
+        } else {
+          semiGrainsMap[key] = (semiGrainsMap[key] || 0) + signedQuantity;
         }
       });
 
@@ -329,7 +348,7 @@ const buildSemiFinishedActualLevelMap = async (selectedDate = '') => {
     console.warn('Supabase semi finished actual sync failed:', error.message);
   }
 
-  return { semiAdjustmentMap, semiGrainsMap, semiFinesMap, semiRawConsumptionMap, semiProductRateMap };
+  return { semiAdjustmentMap, semiGrainsMap, semiFinesMap, semiGreenMap, semiClinkerMap, semiRawConsumptionMap, latestSemiComponentsMap };
 };
 
 const buildCrushingActualLevelMap = async (selectedDate = '') => {
@@ -1060,7 +1079,7 @@ const buildLiftDataMaps = async (selectedDate = '') => {
 
     const [
       { usageMap: productionUsageMap, annualUsageMap: annualProductionUsageMap },
-      { semiAdjustmentMap, semiGrainsMap, semiFinesMap, semiRawConsumptionMap, semiProductRateMap },
+      { semiAdjustmentMap, semiGrainsMap, semiFinesMap, semiGreenMap, semiClinkerMap, semiRawConsumptionMap, latestSemiComponentsMap },
       { crushingAdjustmentMap, crushingGrainsMap, crushingFinesMap, crushingLumpsMap, crushingOutputsMap }
     ] = await Promise.all([
       buildProductionUsageMap(selectedDate),
@@ -1108,12 +1127,14 @@ const buildLiftDataMaps = async (selectedDate = '') => {
       productionUsageMap,
       semiGrainsMap,
       semiFinesMap,
+      semiGreenMap,
+      semiClinkerMap,
       semiRawConsumptionMap,
+      latestSemiComponentsMap,
       crushingGrainsMap,
       crushingFinesMap,
       crushingLumpsMap,
-      crushingOutputsMap,
-      semiProductRateMap
+      crushingOutputsMap
     };
   } catch (error) {
     console.warn('Supabase purchase tables data sync failed:', error.message);
@@ -1127,12 +1148,13 @@ const buildLiftDataMaps = async (selectedDate = '') => {
       productionUsageMap: {},
       semiGrainsMap: {},
       semiFinesMap: {},
+      semiGreenMap: {},
+      semiClinkerMap: {},
       semiRawConsumptionMap: {},
       crushingGrainsMap: {},
       crushingFinesMap: {},
       crushingLumpsMap: {},
-      crushingOutputsMap: {},
-      semiProductRateMap: {}
+      crushingOutputsMap: {}
     };
   }
 };
@@ -1300,12 +1322,14 @@ export const apiService = {
           productionUsageMap,
           semiGrainsMap,
           semiFinesMap,
+          semiGreenMap,
+          semiClinkerMap,
           semiRawConsumptionMap,
+          latestSemiComponentsMap,
           crushingGrainsMap,
           crushingFinesMap,
           crushingLumpsMap,
-          crushingOutputsMap,
-          semiProductRateMap
+          crushingOutputsMap
         },
         productTabRateMap,
         salesRawOrdersResult
@@ -1345,23 +1369,78 @@ export const apiService = {
         salesRawQtyMap[key] = (salesRawQtyMap[key] || 0) + (Number(order.qty) || 0);
       });
 
+      // Compute derived product rates for semi-finished items (e.g. P-14 Green, P14 Clinker, etc.)
+      const derivedSemiRatesMap = {};
+      if (latestSemiComponentsMap && Object.keys(latestSemiComponentsMap).length > 0) {
+        for (let pass = 0; pass < 3; pass++) {
+          let changed = false;
+          Object.entries(latestSemiComponentsMap).forEach(([key, data]) => {
+            const components = data?.components || (Array.isArray(data) ? data : []);
+            const processingCost = data?.processingCost || 0;
+            if (components.length === 0 && processingCost === 0) return;
+            const firmKey = key.split('::')[0];
+
+            let totalCost = 0;
+            let solidQty = 0;
+            let totalQty = 0;
+            let hasValidComponentRate = false;
+
+            components.forEach((comp) => {
+              const rmKey = comp.rmKey;
+              const rmFullKey = `${firmKey}::${rmKey}`;
+
+              let rmRate = ratesMap[rmFullKey] !== undefined
+                ? ratesMap[rmFullKey]
+                : (poRatesMap[rmFullKey] !== undefined
+                  ? poRatesMap[rmFullKey]
+                  : (productTabRateMap[rmFullKey] !== undefined
+                    ? productTabRateMap[rmFullKey]
+                    : (derivedSemiRatesMap[rmFullKey] !== undefined ? derivedSemiRatesMap[rmFullKey] : 0)));
+
+              // If component is a semi-finished product, include its processing cost in its rate for cost multiplication
+              if (derivedSemiRatesMap[rmFullKey] !== undefined) {
+                const compProcCost = latestSemiComponentsMap[rmFullKey]?.processingCost || 0;
+                rmRate = Number(rmRate || 0) + compProcCost;
+              }
+
+              const numericRate = Number(rmRate || 0);
+              if (numericRate > 0) {
+                hasValidComponentRate = true;
+              }
+              totalCost += comp.qty * numericRate;
+
+              const isFuel = rmKey.includes('diesel') || rmKey.includes('fuel') || rmKey.includes('oil');
+              if (!isFuel) {
+                solidQty += comp.qty;
+              }
+              totalQty += comp.qty;
+            });
+
+            const divisorQty = solidQty > 0 ? solidQty : totalQty;
+            if (hasValidComponentRate && divisorQty > 0) {
+              const calcRate = roundTo(totalCost / divisorQty, 2);
+              if (derivedSemiRatesMap[key] !== calcRate) {
+                derivedSemiRatesMap[key] = calcRate;
+                changed = true;
+              }
+            }
+          });
+          if (!changed) break;
+        }
+      }
+
       const inventoryRows = mergeDuplicateInventoryRows((data || [])
         .map((item, index) => {
           const key = `${normalizeFirmKey(item.firm_name)}::${normalizeItemKey(item.item_name)}`;
-          const poRateValue = poRatesMap[key];
-          const semiRateValue = semiProductRateMap[key];
+          const derivedSemiRate = derivedSemiRatesMap[key];
 
-          let baseRate;
-          let isProductionEntryRate = false;
-
-          if (poRateValue !== undefined) {
-            baseRate = poRateValue;
-          } else if (semiRateValue !== undefined) {
-            baseRate = semiRateValue;
-            isProductionEntryRate = true;
-          } else {
-            baseRate = productTabRateMap[key] !== undefined ? productTabRateMap[key] : (item.product_rate ?? '');
-          }
+          const baseRate = poRatesMap[key] !== undefined
+            ? poRatesMap[key]
+            : (productTabRateMap[key] !== undefined
+              ? productTabRateMap[key]
+              : (derivedSemiRate !== undefined
+                ? derivedSemiRate
+                : (item.product_rate ?? '')));
           const transRate = transportingRatesMap[key] || 0;
           let rate = baseRate;
           if (rate !== '') {
@@ -1396,9 +1475,11 @@ export const apiService = {
             optimum_stock: optimumStock,
             op_stock: opStock,
             purchase_system: purchaseQuantityMap[key] || 0,
-            production_consumption: -(productionUsageMap[key] || 0) + (semiGrainsMap[key] || 0) - (semiRawConsumptionMap[key] || 0) + (semiFinesMap[key] || 0) + (crushingGrainsMap[key] || 0) + (crushingLumpsMap[key] || 0) + (crushingOutputsMap[key] || 0),
-            semi_grains: (semiGrainsMap[key] || 0) - (semiRawConsumptionMap[key] || 0),
+            production_consumption: -(productionUsageMap[key] || 0) - (semiRawConsumptionMap[key] || 0) + (semiGrainsMap[key] || 0) + (semiFinesMap[key] || 0) + (semiGreenMap[key] || 0) + (semiClinkerMap[key] || 0) + (crushingGrainsMap[key] || 0) + (crushingLumpsMap[key] || 0) + (crushingOutputsMap[key] || 0),
+            semi_grains: semiGrainsMap[key] || 0,
             semi_fines: semiFinesMap[key] || 0,
+            semi_green: semiGreenMap[key] || 0,
+            semi_clinker: semiClinkerMap[key] || 0,
             crushing_grains: crushingGrainsMap[key] || 0,
             crushing_fines: crushingFinesMap[key] || 0,
             crushing_lumps: crushingLumpsMap[key] || 0,
@@ -1407,7 +1488,6 @@ export const apiService = {
             actual_level: actualLevel,
             product_rate: rate,
             material_rate: baseRate,
-            is_production_entry_rate: isProductionEntryRate,
             transportation_rate: transportingRatesMap[key] !== undefined ? transportingRatesMap[key] : 0,
             optimum_stock_total: calculatedOptimumTotal,
             stock_total: calculatedStockTotal,

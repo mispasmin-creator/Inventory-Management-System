@@ -236,9 +236,8 @@ const buildSemiFinishedActualLevelMap = async (selectedDate: string) => {
     }
 
     if (!productKey) return;
-    const productText = String(productName || '').toLowerCase();
-    const signedQuantity = productText.includes('grains') ? -quantity : productText.includes('fines') ? quantity : 0;
-    if (signedQuantity === 0) return;
+    const signedQuantity = quantity;
+    if (!Number.isFinite(signedQuantity) || signedQuantity <= 0) return;
     const key = `${firmKey}::${productKey}`;
     semiAdjustmentMap[key] = (semiAdjustmentMap[key] || 0) + signedQuantity;
   });

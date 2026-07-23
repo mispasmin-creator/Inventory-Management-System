@@ -88,6 +88,8 @@ const BranchInventory = () => {
   const [rawFactoryEntries, setRawFactoryEntries] = useState([]);
   // Crushing actual processing cost map: key = "firmLower::fgNameLower" → cost
   const [crushingCostMap, setCrushingCostMap] = useState({});
+  // Semi processing actual cost map
+  const [semiProcessingCostMap, setSemiProcessingCostMap] = useState({});
 
   // Forms
   const { register: regAdd, handleSubmit: handleAddSubmit, reset: resetAdd, control: addControl, setValue: setAddValue, formState: { errors: errorsAdd } } = useForm();
@@ -189,6 +191,7 @@ const BranchInventory = () => {
     if (type !== 'raw_material') return;
     fetchRawFactoryEntries();
     fetchCrushingRates();
+    fetchSemiProcessingCosts();
   }, [type]);
 
   const addOptimumStock = useWatch({ control: addControl, name: 'optimum_stock' });
@@ -269,6 +272,51 @@ const BranchInventory = () => {
       setCrushingCostMap(map);
     } catch (e) {
       console.error('Failed to fetch crushing rates:', e);
+    }
+  };
+
+  const fetchSemiProcessingCosts = async () => {
+    try {
+      const { data: productionData, error: prodError } = await productionSupabase
+        .from('semi_production')
+        .select('"SF-Sr No.", "Firm name", "Name Of Semi Finished Good"');
+      if (prodError) throw prodError;
+
+      const { data: actualData, error: actualError } = await productionSupabase
+        .from('semi_actual')
+        .select('"Product Name", "Semi Finished Production No.", "Processing Cost"')
+        .order('id', { ascending: false });
+      if (actualError) throw actualError;
+
+      const sfByFirmAndProduct = {};
+      (productionData || []).forEach(row => {
+        const firmKey = (row['Firm name'] || '').trim().toLowerCase();
+        const productKey = (row['Name Of Semi Finished Good'] || '').trim().toLowerCase();
+        const sfNo = row['SF-Sr No.'];
+        if (firmKey && productKey && sfNo) {
+          const key = `${firmKey}::${productKey}`;
+          if (!sfByFirmAndProduct[key]) sfByFirmAndProduct[key] = new Set();
+          sfByFirmAndProduct[key].add(sfNo);
+        }
+      });
+
+      const map = {};
+      Object.keys(sfByFirmAndProduct).forEach(key => {
+        const sfNumbers = sfByFirmAndProduct[key];
+        const [_, productName] = key.split('::');
+        
+        const latestActual = actualData?.find(a => 
+          (a['Product Name'] || '').trim().toLowerCase() === productName && 
+          sfNumbers.has(a['Semi Finished Production No.'])
+        );
+        
+        if (latestActual && latestActual['Processing Cost']) {
+          map[key] = Number(latestActual['Processing Cost']);
+        }
+      });
+      setSemiProcessingCostMap(map);
+    } catch (e) {
+      console.error('Failed to fetch semi processing costs:', e);
     }
   };
 
@@ -584,9 +632,14 @@ const BranchInventory = () => {
       header: 'Product Rate',
       accessor: 'product_rate',
       render: (row) => {
-        // Crushing actual rate has first priority; fall back to stored product_rate
+        // Crushing actual rate has first priority; fall back to stored product_rate + semi_processing_cost
         const hasCrushingRate = row.crushing_product_rate != null && row.crushing_product_rate > 0;
-        const baseRate = hasCrushingRate ? Number(row.crushing_product_rate) : Number(row.product_rate || 0);
+        const hasSemiCost = row.semi_processing_cost != null && row.semi_processing_cost > 0;
+        
+        const purchaseRate = Number(row.product_rate || 0);
+        const semiCost = hasSemiCost ? Number(row.semi_processing_cost) : 0;
+        
+        const baseRate = hasCrushingRate ? Number(row.crushing_product_rate) : (purchaseRate + semiCost);
         
         let displayRate = baseRate;
         const hasExtraRate = row.added_extra_rate != null && row.added_extra_rate > 0;
@@ -723,7 +776,17 @@ const BranchInventory = () => {
         return crushingCostMap[directKey] != null ? crushingCostMap[directKey] : null;
       })();
 
-      const baseProductRate = crushingRate != null && crushingRate > 0 ? crushingRate : Number(item.product_rate || 0);
+      // Semi processing actual cost
+      const semiProcessingCost = (() => {
+        if (!firmKey || !itemKey) return null;
+        const directKey = `${firmKey}::${itemKey}`;
+        return semiProcessingCostMap[directKey] != null ? semiProcessingCostMap[directKey] : null;
+      })();
+
+      const purchaseRate = Number(item.product_rate || 0);
+      const semiCost = semiProcessingCost != null ? Number(semiProcessingCost) : 0;
+      
+      const baseProductRate = crushingRate != null && crushingRate > 0 ? crushingRate : (purchaseRate + semiCost);
       let extraRate = 0;
       let extraLabel = '';
       
@@ -750,16 +813,20 @@ const BranchInventory = () => {
       return {
         ...item,
         stock_adjustment: firmAdjustmentTotal + legacyAdjustmentTotal,
-        actual_level: adjustedActualLevel,
-        d_con: calculatedDCon,
+        actual_level: actual,
+        d_con: calculatedDCon !== null ? calculatedDCon : item.d_con,
+        optimum_stock_total: calculateOptimumStockTotal(optimum, baseProductRate),
+        stock_total: calculateStockTotal(actual, baseProductRate),
+        status,
         colour: status,
         colour_group: getColourForStatus(status),
         crushing_product_rate: crushingRate,
-        added_extra_rate: extraRate,
+        semi_processing_cost: semiCost > 0 ? semiCost : null,
+        added_extra_rate: extraRate > 0 ? extraRate : null,
         added_extra_label: extraLabel,
       };
     });
-  }, [inventoryItems, rawFactoryEntries, crushingCostMap, type]);
+  }, [inventoryItems, type, rawFactoryEntries, crushingCostMap, semiProcessingCostMap]);
 
   const displayedInventoryItems = React.useMemo(() => {
     const filtered = (processedInventoryItems || []).filter(item => {
@@ -1513,11 +1580,9 @@ const BranchInventory = () => {
 
           <div className="grid grid-cols-2 gap-y-4 gap-x-6 py-2">
             <div>
-              <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
-                {rateBreakdownItem?.is_production_entry_rate ? 'Production Entry Rate' : 'Product Rate'}
-              </div>
+              <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Product Rate</div>
               <div className="text-sm font-bold text-slate-100 mt-1">
-                {renderRawCurrency(rateBreakdownItem?.material_rate)}
+                {renderRawCurrency(rateBreakdownItem?.product_rate)}
               </div>
             </div>
             <div>
@@ -1531,6 +1596,14 @@ const BranchInventory = () => {
                 <div className="text-[10px] font-semibold text-emerald-400 uppercase tracking-wider">Crushing Processing Cost</div>
                 <div className="text-sm font-bold text-emerald-300 mt-1">
                   {renderRawCurrency(rateBreakdownItem?.crushing_product_rate)}
+                </div>
+              </div>
+            )}
+            {rateBreakdownItem?.semi_processing_cost != null && rateBreakdownItem?.semi_processing_cost > 0 && (
+              <div>
+                <div className="text-[10px] font-semibold text-amber-500 uppercase tracking-wider">Semi Finished Processing Cost</div>
+                <div className="text-sm font-bold text-amber-400 mt-1">
+                  {renderRawCurrency(rateBreakdownItem?.semi_processing_cost)}
                 </div>
               </div>
             )}
@@ -1550,7 +1623,10 @@ const BranchInventory = () => {
               <div className="text-lg font-black text-emerald-400 mt-1">
                 {(() => {
                   const hasCrushingRate = rateBreakdownItem?.crushing_product_rate != null && rateBreakdownItem?.crushing_product_rate > 0;
-                  const baseRate = hasCrushingRate ? Number(rateBreakdownItem.crushing_product_rate) : Number(rateBreakdownItem?.product_rate || 0);
+                  const purchaseRate = Number(rateBreakdownItem?.product_rate || 0);
+                  const semiCost = rateBreakdownItem?.semi_processing_cost != null && rateBreakdownItem?.semi_processing_cost > 0 ? Number(rateBreakdownItem.semi_processing_cost) : 0;
+                  
+                  const baseRate = hasCrushingRate ? Number(rateBreakdownItem.crushing_product_rate) : (purchaseRate + semiCost);
                   const hasExtraRate = rateBreakdownItem?.added_extra_rate != null && rateBreakdownItem?.added_extra_rate > 0;
                   const displayRate = baseRate + (hasExtraRate ? Number(rateBreakdownItem.added_extra_rate) : 0);
                   return renderRawCurrency(displayRate);
@@ -1623,7 +1699,7 @@ const BranchInventory = () => {
                 {(() => {
                   const prodVal = (() => {
                     const net = Number(prodBreakdownItem?.production_consumption || 0);
-                    const semiAdj = Number(prodBreakdownItem?.semi_fines || 0) + Number(prodBreakdownItem?.semi_grains || 0);
+                    const semiAdj = Number(prodBreakdownItem?.semi_fines || 0) + Number(prodBreakdownItem?.semi_grains || 0) + Number(prodBreakdownItem?.semi_green || 0) + Number(prodBreakdownItem?.semi_clinker || 0);
                     const crushAdj = Number(prodBreakdownItem?.crushing_grains || 0) + Number(prodBreakdownItem?.crushing_fines || 0) + Number(prodBreakdownItem?.crushing_lumps || 0) + Number(prodBreakdownItem?.crushing_outputs || 0);
                     return net - semiAdj - crushAdj;
                   })();
@@ -1657,7 +1733,7 @@ const BranchInventory = () => {
 
                 {/* Row 3: Grains Output */}
                 <tr className="hover:bg-slate-800/10 transition-colors duration-150">
-                  <td className="px-4 py-2 text-slate-400 font-medium whitespace-nowrap">Grains Output</td>
+                  <td className="px-4 py-2 text-slate-400 font-medium whitespace-nowrap">Grains Output (+)</td>
                   <td className="px-4 py-2 text-slate-600 whitespace-nowrap">—</td>
                   <td className={`px-4 py-2 font-semibold whitespace-nowrap ${Number(prodBreakdownItem?.semi_grains || 0) > 0 ? 'text-emerald-400' : Number(prodBreakdownItem?.semi_grains || 0) < 0 ? 'text-rose-400' : 'text-slate-600'}`}>
                     {Number(prodBreakdownItem?.semi_grains || 0) !== 0
@@ -1671,7 +1747,31 @@ const BranchInventory = () => {
                   </td>
                 </tr>
 
-                {/* Row 4: Lumps / Fired */}
+                {/* Row 4: Green Output */}
+                <tr className="hover:bg-slate-800/10 transition-colors duration-150">
+                  <td className="px-4 py-2 text-slate-400 font-medium whitespace-nowrap">Green Output (+)</td>
+                  <td className="px-4 py-2 text-slate-600 whitespace-nowrap">—</td>
+                  <td className={`px-4 py-2 font-semibold whitespace-nowrap ${Number(prodBreakdownItem?.semi_green || 0) > 0 ? 'text-emerald-400' : Number(prodBreakdownItem?.semi_green || 0) < 0 ? 'text-rose-400' : 'text-slate-600'}`}>
+                    {Number(prodBreakdownItem?.semi_green || 0) !== 0
+                      ? Number(prodBreakdownItem.semi_green).toLocaleString(undefined, { maximumFractionDigits: 3 })
+                      : '—'}
+                  </td>
+                  <td className="px-4 py-2 text-slate-600 whitespace-nowrap">—</td>
+                </tr>
+
+                {/* Row 5: Clinker Output */}
+                <tr className="hover:bg-slate-800/10 transition-colors duration-150">
+                  <td className="px-4 py-2 text-slate-400 font-medium whitespace-nowrap">Clinker Output (+)</td>
+                  <td className="px-4 py-2 text-slate-600 whitespace-nowrap">—</td>
+                  <td className={`px-4 py-2 font-semibold whitespace-nowrap ${Number(prodBreakdownItem?.semi_clinker || 0) > 0 ? 'text-emerald-400' : Number(prodBreakdownItem?.semi_clinker || 0) < 0 ? 'text-rose-400' : 'text-slate-600'}`}>
+                    {Number(prodBreakdownItem?.semi_clinker || 0) !== 0
+                      ? Number(prodBreakdownItem.semi_clinker).toLocaleString(undefined, { maximumFractionDigits: 3 })
+                      : '—'}
+                  </td>
+                  <td className="px-4 py-2 text-slate-600 whitespace-nowrap">—</td>
+                </tr>
+
+                {/* Row 6: Lumps / Fired */}
                 <tr className="hover:bg-slate-800/10 transition-colors duration-150">
                   <td className="px-4 py-2 text-slate-400 font-medium whitespace-nowrap">Lumps / Fired Input (−)</td>
                   <td className="px-4 py-2 text-slate-600 whitespace-nowrap">—</td>
@@ -1683,7 +1783,7 @@ const BranchInventory = () => {
                   </td>
                 </tr>
 
-                {/* Row 5: Finished Goods Output */}
+                {/* Row 7: Finished Goods Output */}
                 <tr className="hover:bg-slate-800/10 transition-colors duration-150">
                   <td className="px-4 py-2 text-slate-400 font-medium whitespace-nowrap">Crushing Grains (+)</td>
                   <td className="px-4 py-2 text-slate-600 whitespace-nowrap">—</td>
@@ -1699,11 +1799,11 @@ const BranchInventory = () => {
                 {(() => {
                   const prodVal = (() => {
                     const net = Number(prodBreakdownItem?.production_consumption || 0);
-                    const semiAdj = Number(prodBreakdownItem?.semi_fines || 0) + Number(prodBreakdownItem?.semi_grains || 0);
+                    const semiAdj = Number(prodBreakdownItem?.semi_fines || 0) + Number(prodBreakdownItem?.semi_grains || 0) + Number(prodBreakdownItem?.semi_green || 0) + Number(prodBreakdownItem?.semi_clinker || 0);
                     const crushAdj = Number(prodBreakdownItem?.crushing_grains || 0) + Number(prodBreakdownItem?.crushing_fines || 0) + Number(prodBreakdownItem?.crushing_lumps || 0) + Number(prodBreakdownItem?.crushing_outputs || 0);
                     return net - semiAdj - crushAdj;
                   })();
-                  const semiVal = Number(prodBreakdownItem?.semi_fines || 0) + Number(prodBreakdownItem?.semi_grains || 0);
+                  const semiVal = Number(prodBreakdownItem?.semi_fines || 0) + Number(prodBreakdownItem?.semi_grains || 0) + Number(prodBreakdownItem?.semi_green || 0) + Number(prodBreakdownItem?.semi_clinker || 0);
                   const crushVal = Number(prodBreakdownItem?.crushing_grains || 0) + Number(prodBreakdownItem?.crushing_fines || 0) + Number(prodBreakdownItem?.crushing_lumps || 0) + Number(prodBreakdownItem?.crushing_outputs || 0);
                   return (
                     <tr className="border-t-2 border-emerald-800/60 bg-emerald-950/20">
