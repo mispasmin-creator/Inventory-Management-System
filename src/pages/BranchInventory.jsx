@@ -795,8 +795,12 @@ const BranchInventory = () => {
       if (finesMatch && semiCost > 0) {
         const base = finesMatch[1].trim();
         const grainSuffixes = ['(0-1)', '(1-3)', '(3-5)'];
+        // Look up siblings in `totalsItems` (the unpaginated fetch), not the paginated
+        // `inventoryItems` table data, since a grain sibling can easily land on a
+        // different page than the "Fines" row and would otherwise never be found.
+        const siblingSource = totalsItems.length > 0 ? totalsItems : inventoryItems;
         for (const suffix of grainSuffixes) {
-          const grainItem = inventoryItems.find(
+          const grainItem = siblingSource.find(
             (i) => i.firm_name?.trim().toLowerCase() === firmKey && i.item_name?.trim().toLowerCase() === `${base} ${suffix}`
           );
           if (grainItem && Number(grainItem.product_rate) > 0) {
@@ -848,7 +852,7 @@ const BranchInventory = () => {
         fines_grains_rate: finesGrainsRate,
       };
     });
-  }, [inventoryItems, type, rawFactoryEntries, crushingCostMap, semiProcessingCostMap]);
+  }, [inventoryItems, totalsItems, type, rawFactoryEntries, crushingCostMap, semiProcessingCostMap]);
 
   const displayedInventoryItems = React.useMemo(() => {
     const filtered = (processedInventoryItems || []).filter(item => {
