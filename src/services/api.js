@@ -1056,24 +1056,20 @@ const buildLiftDataMaps = async (selectedDate = '') => {
       ) {
         latestReceivingDateMap[key] = rowDate;
         poRatesMap[key] = liftMaterialRate;
-      }
 
-      // Set the latest Per MT Transportation Rate.
-      // Applicable when Type Of Transporting Rate is "Per MT" or "Fixed":
-      // perMTRate = Transporter Rate / Lifting Qty (rounded to 2 decimals).
-      if (transportingRatesMap[key] === undefined) {
+        // Per MT Transportation Rate must come from this SAME record (not some other
+        // row picked independently), so it always matches the row the base rate came from.
+        // Applicable when Type Of Transporting Rate is "Per MT" or "Fixed":
+        // perMTRate = Transporter Rate / Lifting Qty (rounded to 2 decimals).
         const rateType = String(row['Type Of Transporting Rate'] || '').trim().toLowerCase();
         const transporterRate = Number(row['Transporter Rate']);
         const liftingQty = Number(row['Lifting Qty']);
-
-        if (
+        transportingRatesMap[key] = (
           (rateType === 'per mt' || rateType === 'fixed') &&
           Number.isFinite(transporterRate) &&
           Number.isFinite(liftingQty) &&
           liftingQty !== 0
-        ) {
-          transportingRatesMap[key] = roundTo(transporterRate / liftingQty, 2);
-        }
+        ) ? roundTo(transporterRate / liftingQty, 2) : 0;
       }
     });
 
@@ -1378,6 +1374,12 @@ export const apiService = {
             const components = data?.components || (Array.isArray(data) ? data : []);
             const processingCost = data?.processingCost || 0;
             if (components.length === 0 && processingCost === 0) return;
+            // "<Base> Fines" items are already priced on the frontend (grain sibling's rate +
+            // its own processing cost — see BranchInventory.jsx). Skip them here so this
+            // component-only rate (which excludes processing cost) doesn't get handed to the
+            // frontend as if it were a complete rate, causing the processing cost to be
+            // silently dropped for them.
+            if (key.split('::')[1]?.endsWith('fines')) return;
             const firmKey = key.split('::')[0];
 
             let totalCost = 0;

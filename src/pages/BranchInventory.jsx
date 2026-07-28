@@ -528,6 +528,10 @@ const BranchInventory = () => {
   ];
 
   const renderRawNumber = (value) => value !== null && value !== undefined && value !== '' ? Math.abs(Number(value)).toLocaleString() : '';
+  // A "Fines" item priced directly from its own purchase data (grains fallback not used)
+  // already reflects the final rate: its processing cost shouldn't be added or shown.
+  const isFinesOwnPurchaseRate = (item) =>
+    /\sfines$/.test((item?.item_name || '').trim().toLowerCase()) && item?.fines_grains_rate == null;
   const renderRawCurrency = (value) => {
     const num = (value !== null && value !== undefined && value !== '' && value !== '-') ? Number(value) : 0;
     const cleanNum = Number.isFinite(num) ? Math.abs(num) : 0;
@@ -635,9 +639,11 @@ const BranchInventory = () => {
         // Crushing actual rate has first priority; fall back to stored product_rate + semi_processing_cost
         const hasCrushingRate = row.crushing_product_rate != null && row.crushing_product_rate > 0;
         const hasSemiCost = row.semi_processing_cost != null && row.semi_processing_cost > 0;
-        
+
         const purchaseRate = row.fines_grains_rate != null ? Number(row.fines_grains_rate) : Number(row.product_rate || 0);
-        const semiCost = hasSemiCost ? Number(row.semi_processing_cost) : 0;
+        // A "Fines" item priced directly from its own purchase data (no grains fallback used)
+        // already reflects the final rate: don't stack the processing cost on top of it.
+        const semiCost = (hasSemiCost && !isFinesOwnPurchaseRate(row)) ? Number(row.semi_processing_cost) : 0;
 
         const baseRate = hasCrushingRate ? Number(row.crushing_product_rate) : (purchaseRate + semiCost);
         
@@ -786,13 +792,14 @@ const BranchInventory = () => {
       const purchaseRate = Number(item.product_rate || 0);
       const semiCost = semiProcessingCost != null ? Number(semiProcessingCost) : 0;
 
-      // "<Base> Fines" products with a semi processing cost: don't use the purchase rate,
-      // use it only as a fallback. The grain siblings ("<Base> (0-1)", "<Base> (1-3)",
-      // "<Base> (3-5)") all carry the same rate, so take that one rate (not a sum of all three)
-      // and combine it with the processing cost.
+      // "<Base> Fines" products with a semi processing cost: prefer the Fines item's own
+      // purchase rate when available. Only when purchase has no rate for the Fines item
+      // itself do we fall back to the grain siblings' rate ("<Base> (0-1)", "<Base> (1-3)",
+      // "<Base> (3-5)" all carry the same rate, so take that one rate, not a sum of all three)
+      // combined with the processing cost.
       let finesGrainsRate = null;
       const finesMatch = itemKey && itemKey.match(/^(.*)\s+fines$/);
-      if (finesMatch && semiCost > 0) {
+      if (finesMatch && semiCost > 0 && purchaseRate <= 0) {
         const base = finesMatch[1].trim();
         const grainSuffixes = ['(0-1)', '(1-3)', '(3-5)'];
         // Look up siblings in `totalsItems` (the unpaginated fetch), not the paginated
@@ -810,8 +817,14 @@ const BranchInventory = () => {
         }
       }
 
-      const effectivePurchaseRate = finesGrainsRate !== null ? finesGrainsRate : purchaseRate;
-      const baseProductRate = crushingRate != null && crushingRate > 0 ? crushingRate : (effectivePurchaseRate + semiCost);
+      const effectivePurchaseRate = purchaseRate > 0 ? purchaseRate : (finesGrainsRate !== null ? finesGrainsRate : purchaseRate);
+      // Fines rate sourced directly from its own purchase data already reflects the final
+      // rate: don't add the processing cost on top. The processing cost only applies when
+      // the rate was derived from the grain siblings' fallback.
+      const isFinesOwnPurchaseRate = finesMatch && purchaseRate > 0;
+      const baseProductRate = crushingRate != null && crushingRate > 0
+        ? crushingRate
+        : (effectivePurchaseRate + (isFinesOwnPurchaseRate ? 0 : semiCost));
       let extraRate = 0;
       let extraLabel = '';
       
@@ -1608,7 +1621,7 @@ const BranchInventory = () => {
             <div>
               <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Product Rate</div>
               <div className="text-sm font-bold text-slate-100 mt-1">
-                {renderRawCurrency(rateBreakdownItem?.fines_grains_rate != null ? rateBreakdownItem.fines_grains_rate : rateBreakdownItem?.product_rate)}
+                {renderRawCurrency(rateBreakdownItem?.fines_grains_rate != null ? rateBreakdownItem.fines_grains_rate : rateBreakdownItem?.material_rate)}
               </div>
             </div>
             <div>
@@ -1625,7 +1638,7 @@ const BranchInventory = () => {
                 </div>
               </div>
             )}
-            {rateBreakdownItem?.semi_processing_cost != null && rateBreakdownItem?.semi_processing_cost > 0 && (
+            {rateBreakdownItem?.semi_processing_cost != null && rateBreakdownItem?.semi_processing_cost > 0 && !isFinesOwnPurchaseRate(rateBreakdownItem) && (
               <div>
                 <div className="text-[10px] font-semibold text-amber-500 uppercase tracking-wider">Semi Finished Processing Cost</div>
                 <div className="text-sm font-bold text-amber-400 mt-1">
@@ -1650,7 +1663,7 @@ const BranchInventory = () => {
                 {(() => {
                   const hasCrushingRate = rateBreakdownItem?.crushing_product_rate != null && rateBreakdownItem?.crushing_product_rate > 0;
                   const purchaseRate = rateBreakdownItem?.fines_grains_rate != null ? Number(rateBreakdownItem.fines_grains_rate) : Number(rateBreakdownItem?.product_rate || 0);
-                  const semiCost = rateBreakdownItem?.semi_processing_cost != null && rateBreakdownItem?.semi_processing_cost > 0 ? Number(rateBreakdownItem.semi_processing_cost) : 0;
+                  const semiCost = (rateBreakdownItem?.semi_processing_cost != null && rateBreakdownItem?.semi_processing_cost > 0 && !isFinesOwnPurchaseRate(rateBreakdownItem)) ? Number(rateBreakdownItem.semi_processing_cost) : 0;
 
                   const baseRate = hasCrushingRate ? Number(rateBreakdownItem.crushing_product_rate) : (purchaseRate + semiCost);
                   const hasExtraRate = rateBreakdownItem?.added_extra_rate != null && rateBreakdownItem?.added_extra_rate > 0;
