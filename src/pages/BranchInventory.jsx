@@ -794,9 +794,8 @@ const BranchInventory = () => {
 
       // "<Base> Fines" products with a semi processing cost: prefer the Fines item's own
       // purchase rate when available. Only when purchase has no rate for the Fines item
-      // itself do we fall back to the grain siblings' rate ("<Base> (0-1)", "<Base> (1-3)",
-      // "<Base> (3-5)" all carry the same rate, so take that one rate, not a sum of all three)
-      // combined with the processing cost.
+      // itself do we fall back to a sibling's rate — "<Base> (0-1)", "<Base> (1-3)",
+      // "<Base> (3-5)" all carry the same rate, so take that one rate, not a sum of all three.
       let finesGrainsRate = null;
       const finesMatch = itemKey && itemKey.match(/^(.*)\s+fines$/);
       if (finesMatch && semiCost > 0 && purchaseRate <= 0) {
@@ -813,6 +812,29 @@ const BranchInventory = () => {
           if (grainItem && Number(grainItem.product_rate) > 0) {
             finesGrainsRate = Number(grainItem.product_rate);
             break;
+          }
+        }
+
+        // Families that don't use grain-size naming (e.g. P14: Green/Clinker/Fines, or
+        // 99 C: Green/Fired/Fines) fall back to "<Base> Clinker" / "<Base> Fired" — using
+        // that sibling's own fully-priced rate (its material rate plus ITS OWN semi
+        // processing cost, i.e. what actually shows in its Product Rate column), since
+        // Fines is a further byproduct of that same intermediate product.
+        if (finesGrainsRate === null) {
+          const processedSuffixes = ['clinker', 'fired'];
+          for (const suffix of processedSuffixes) {
+            const processedItem = siblingSource.find(
+              (i) => i.firm_name?.trim().toLowerCase() === firmKey && i.item_name?.trim().toLowerCase() === `${base} ${suffix}`
+            );
+            if (processedItem) {
+              const processedItemKey = processedItem.item_name?.trim().toLowerCase();
+              const processedItemCost = Number(semiProcessingCostMap[`${firmKey}::${processedItemKey}`] || 0);
+              const processedFullRate = Number(processedItem.product_rate || 0) + processedItemCost;
+              if (processedFullRate > 0) {
+                finesGrainsRate = processedFullRate;
+                break;
+              }
+            }
           }
         }
       }
