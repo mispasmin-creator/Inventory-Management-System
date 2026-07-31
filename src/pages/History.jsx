@@ -108,7 +108,7 @@ const History = () => {
       const [raw, finish] = await Promise.all([
         readAll(
           'inventory_master_history',
-          'firm_name, item_name, unit, actual_level, optimum_qty, max_qty, snapshot_date',
+          'firm_name, item_name, unit, actual_level, product_rate, optimum_qty, max_qty, snapshot_date',
           'item_name',
         ),
         readAll(
@@ -118,7 +118,7 @@ const History = () => {
         ),
       ]);
 
-      const processData = (data, nameField, levelField, extraFields) => {
+      const processData = (data, nameField, levelField, extraFields, rateField) => {
         const map = new Map();
         const dates = new Set();
         data.forEach(row => {
@@ -133,6 +133,9 @@ const History = () => {
                });
             }
             map.get(key)[row.snapshot_date] = row[levelField];
+            if (rateField) {
+              map.get(key)[`${row.snapshot_date}__rate`] = row[rateField];
+            }
           }
         });
         const datesArray = Array.from(dates).sort();
@@ -142,7 +145,7 @@ const History = () => {
         };
       };
 
-      const rawProcessed = processData(raw, 'item_name', 'actual_level', ['unit', 'optimum_qty', 'max_qty']);
+      const rawProcessed = processData(raw, 'item_name', 'actual_level', ['unit', 'optimum_qty', 'max_qty'], 'product_rate');
       setRawDates(rawProcessed.dates);
       setRawRows(rawProcessed.rows);
 
@@ -172,21 +175,34 @@ const History = () => {
       { header: 'Unit', accessor: 'unit', render: (row) => row.unit || '-' },
     ];
 
-    const dateCols = activeDates.map(date => ({
-      header: toDisplayDate(date),
-      accessor: date,
-      cellClassName: (row) => {
-        const value = row[date];
-        if (value === null || value === undefined || value === '') return '';
-        if (isFinishGood) {
-          return Number(value) < Number(row.sales_order_pending || 0)
-            ? 'bg-gradient-to-r from-red-500/95 to-rose-600/95 text-white font-bold'
-            : 'bg-gradient-to-r from-emerald-500/95 to-teal-600/95 text-white font-bold';
-        }
-        return RAW_STATUS_CLASS[getRawStatus(value, row.optimum_qty, row.max_qty)] || '';
-      },
-      render: (row) => formatNumber(row[date]),
-    }));
+    const dateCols = activeDates.flatMap(date => {
+      const levelCol = {
+        header: toDisplayDate(date),
+        accessor: date,
+        cellClassName: (row) => {
+          const value = row[date];
+          if (value === null || value === undefined || value === '') return '';
+          if (isFinishGood) {
+            return Number(value) < Number(row.sales_order_pending || 0)
+              ? 'bg-gradient-to-r from-red-500/95 to-rose-600/95 text-white font-bold'
+              : 'bg-gradient-to-r from-emerald-500/95 to-teal-600/95 text-white font-bold';
+          }
+          return RAW_STATUS_CLASS[getRawStatus(value, row.optimum_qty, row.max_qty)] || '';
+        },
+        render: (row) => formatNumber(row[date]),
+      };
+
+      if (isFinishGood) return [levelCol];
+
+      const rateAccessor = `${date}__rate`;
+      const rateCol = {
+        header: `${toDisplayDate(date)} Rate`,
+        accessor: rateAccessor,
+        render: (row) => formatNumber(row[rateAccessor], 2),
+      };
+
+      return [levelCol, rateCol];
+    });
 
     return [...baseColumns, ...dateCols];
   }, [isFinishGood, activeDates]);

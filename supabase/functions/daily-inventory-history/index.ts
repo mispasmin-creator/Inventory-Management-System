@@ -92,6 +92,33 @@ const normalizeProductionFirmName = (value: unknown): unknown =>
 // Order firms use the same mapping as production.
 const normalizeOrderFirmName = normalizeProductionFirmName;
 
+const roundTo = (value: number, decimals = 2): number => {
+  const factor = 10 ** decimals;
+  return Math.round(value * factor) / factor;
+};
+
+// Packaging items whose Product Rate is computed as (Billing Qty * Rate) / Total Bag Qty
+// instead of using the plain "Rate" column. Mirrors BAG_RATE_ITEM_KEYS in api.js.
+const BAG_RATE_ITEM_KEYS = new Set([
+  'Pasheat-CLC PP Bags 25 Kg',
+  'PP Bag (25 kgs)',
+  'Pp Bag (50 kgs)',
+  'PP BAG B - 25',
+  'PP BAG R - 25',
+].map(normalizeItemKey));
+
+// Items whose LIFT-ACCOUNTS "Rate" is stored per 1000 units, so the Product Rate is divided by 1000.
+const RATE_DIVIDE_BY_1000_ITEM_KEYS = new Set(['Light Diesel Oil'].map(normalizeItemKey));
+
+// Same "Unload Approval" completion filter api.js uses for the packaging bag rate calculation.
+const isUnloadApprovalComplete = (row: Row): boolean => {
+  const status = row['Unload Approval Status'];
+  const required = row['Unload Approval Required'];
+  if (status === 'Rejected' || status === 'Completed') return true;
+  if (status === 'Approved' && required !== 'Yes') return true;
+  if (status === 'Approved' && required === 'Yes' && Boolean(row['Planned 2'] || row['Actual 2'])) return true;
+  return false;
+};
 
 type Row = Record<string, any>;
 type Bucket = { before: number; after: number; total: number };
@@ -192,6 +219,7 @@ const buildProductionUsageMap = async (selectedDate: string) => {
 const buildSemiFinishedActualLevelMap = async (selectedDate: string) => {
   const semiAdjustmentMap: Record<string, number> = {};
   const semiRawConsumptionMap: Record<string, number> = {};
+  const latestSemiComponentsMap: Record<string, { components: { rmKey: string; qty: number }[]; processingCost: number }> = {};
   const productionFirmMap = new Map<string, unknown>();
 
   const semiProduction = await fetchAll(
@@ -208,7 +236,14 @@ const buildSemiFinishedActualLevelMap = async (selectedDate: string) => {
     }
   });
 
-  const semiActual = await fetchAll(db().productionDb, 'semi_actual', '*');
+  // Ordered newest-first so latestSemiComponentsMap below picks up each product's
+  // most recent component list — mirrors api.js's buildSemiFinishedActualLevelMap.
+  const semiActual = await fetchAll(
+    db().productionDb,
+    'semi_actual',
+    '*',
+    (q) => q.order('id', { ascending: false }),
+  );
   semiActual.forEach((row) => {
     const rowDate = getLocalDateString(row['Date Of Production'] || row.Timestamp || row.created_at || row.date);
     if (selectedDate && (!rowDate || rowDate < selectedDate)) return;
@@ -240,9 +275,30 @@ const buildSemiFinishedActualLevelMap = async (selectedDate: string) => {
     if (!Number.isFinite(signedQuantity) || signedQuantity <= 0) return;
     const key = `${firmKey}::${productKey}`;
     semiAdjustmentMap[key] = (semiAdjustmentMap[key] || 0) + signedQuantity;
+
+    // Component rates, used to derive Product Rate for semi-finished goods (e.g. P-14
+    // Green/Clinker) — only the first (i.e. latest, rows are id-desc) row per key is kept.
+    if (!latestSemiComponentsMap[key]) {
+      latestSemiComponentsMap[key] = { components: [], processingCost: 0 };
+    }
+    if (!latestSemiComponentsMap[key].processingCost && row['Processing Cost']) {
+      latestSemiComponentsMap[key].processingCost = Number(row['Processing Cost']);
+    }
+    if (latestSemiComponentsMap[key].components.length === 0) {
+      const components: { rmKey: string; qty: number }[] = [];
+      for (let i = 1; i <= 5; i++) {
+        const rmKey = normalizeItemKey(row[`Raw Material Name ${i}`]);
+        const rmQtyRaw = row[`Quantity Of Raw Material ${i}`];
+        const rmQty = Number(rmQtyRaw);
+        if (rmKey && rmQtyRaw !== null && rmQtyRaw !== '' && Number.isFinite(rmQty) && rmQty > 0) {
+          components.push({ rmKey, qty: rmQty });
+        }
+      }
+      if (components.length > 0) latestSemiComponentsMap[key].components = components;
+    }
   });
 
-  return { semiAdjustmentMap, semiRawConsumptionMap };
+  return { semiAdjustmentMap, semiRawConsumptionMap, latestSemiComponentsMap };
 };
 
 const buildCrushingActualLevelMap = async (selectedDate: string) => {
@@ -285,15 +341,40 @@ const buildCrushingActualLevelMap = async (selectedDate: string) => {
   return { crushingAdjustmentMap, crushingOutputsMap };
 };
 
-// Only the receipt quantities are needed — the rate columns api.js reads are not
-// stored in the history, so they are neither fetched nor computed here.
+// Rates entered manually in Stock Adjustment's "Product Rate" tab (stock_adjustment.rate).
+// Used only as a fallback when the purchase system (LIFT-ACCOUNTS) has no rate for that item.
+const buildProductTabRateMap = async (): Promise<Record<string, number>> => {
+  const rateMap: Record<string, number> = {};
+  const rows = await fetchAll(
+    db().inventoryDb,
+    'stock_adjustment',
+    'firm_name, item_name, rate, created_at',
+    (q) => q.eq('material_type', 'raw_material').not('rate', 'is', null).order('created_at', { ascending: false }),
+  );
+  rows.forEach((row) => {
+    const firmKey = normalizeFirmKey(row.firm_name);
+    const itemKey = normalizeItemKey(row.item_name);
+    const rate = Number(row.rate);
+    if (!firmKey || !itemKey || !Number.isFinite(rate)) return;
+    const key = `${firmKey}::${itemKey}`;
+    // Rows are ordered newest-first, so the first rate seen per key is the latest one.
+    if (rateMap[key] === undefined) rateMap[key] = rate;
+  });
+  return rateMap;
+};
+
 const buildLiftDataMaps = async (selectedDate: string) => {
   const actualQuantityMap: Record<string, number> = {};
+  const poRatesMap: Record<string, number> = {};
+  const transportingRatesMap: Record<string, number> = {};
+  const latestReceivingDateMap: Record<string, string> = {};
 
   const liftRows = await fetchAll(
     db().purchaseDb,
     'LIFT-ACCOUNTS',
-    'id, "Firm Name", "Raw Material Name", "Actual Quantity", "Date Of Receiving", "Actual 1"',
+    'id, "Firm Name", "Raw Material Name", "Actual Quantity", "Rate", "Transporter Rate", "Lifting Qty", '
+      + '"Total Bags Qty", "Type Of Transporting Rate", "Date Of Receiving", "Actual 1", '
+      + '"Unload Approval Status", "Unload Approval Required", "Planned 2", "Actual 2"',
     (q) => q.not('Actual 1', 'is', null).not('Actual Quantity', 'is', null).order('Actual 1', { ascending: false }),
   );
 
@@ -304,20 +385,67 @@ const buildLiftDataMaps = async (selectedDate: string) => {
     const itemKey = normalizeItemKey(row['Raw Material Name']);
     if (!firmKey || !itemKey) return;
 
-    const rowDate = getLocalDateString(row['Date Of Receiving']);
-    if (selectedDate && !(rowDate && rowDate >= selectedDate)) return;
-
-    const actualQuantity = Number(row['Actual Quantity']);
-    if (!Number.isFinite(actualQuantity)) return;
-
     const key = `${firmKey}::${itemKey}`;
-    actualQuantityMap[key] = (actualQuantityMap[key] || 0) + actualQuantity;
+    const rowDate = getLocalDateString(row['Date Of Receiving']);
+    const isInSelectedPeriod = !selectedDate || (rowDate && rowDate >= selectedDate);
+
+    // Quantity is only accumulated for the selected period, but the rate (below) always
+    // looks at the single most-recent receipt regardless of selectedDate — same as api.js.
+    const actualQuantity = Number(row['Actual Quantity']);
+    if (isInSelectedPeriod && Number.isFinite(actualQuantity)) {
+      actualQuantityMap[key] = (actualQuantityMap[key] || 0) + actualQuantity;
+    }
+
+    // Product Rate: take the Rate from the LIFT-ACCOUNTS record with the latest Date Of
+    // Receiving. For packaging bag items (BAG_RATE_ITEM_KEYS), the rate is instead computed
+    // as (Billing Qty * Rate) / Total Bag Qty from rows whose Unload Approval is complete.
+    let liftMaterialRate: number;
+    if (BAG_RATE_ITEM_KEYS.has(itemKey)) {
+      const billingQty = Number(row['Lifting Qty']);
+      const rate = Number(row['Rate']);
+      const totalBagQty = Number(row['Total Bags Qty']);
+      liftMaterialRate = (
+        isUnloadApprovalComplete(row) &&
+        Number.isFinite(billingQty) &&
+        Number.isFinite(rate) &&
+        Number.isFinite(totalBagQty) &&
+        totalBagQty !== 0
+      ) ? (billingQty * rate) / totalBagQty : NaN;
+    } else {
+      liftMaterialRate = Number(row['Rate']);
+    }
+    if (RATE_DIVIDE_BY_1000_ITEM_KEYS.has(itemKey) && Number.isFinite(liftMaterialRate)) {
+      liftMaterialRate = liftMaterialRate / 1000;
+    }
+
+    if (
+      rowDate &&
+      Number.isFinite(liftMaterialRate) &&
+      (latestReceivingDateMap[key] === undefined || rowDate > latestReceivingDateMap[key])
+    ) {
+      latestReceivingDateMap[key] = rowDate;
+      poRatesMap[key] = liftMaterialRate;
+
+      // Per-MT transportation rate must come from this SAME record so it always matches
+      // the row the base rate came from. Applicable when Type Of Transporting Rate is
+      // "Per MT" or "Fixed": perMTRate = Transporter Rate / Lifting Qty.
+      const rateType = String(row['Type Of Transporting Rate'] || '').trim().toLowerCase();
+      const transporterRate = Number(row['Transporter Rate']);
+      const liftingQty = Number(row['Lifting Qty']);
+      transportingRatesMap[key] = (
+        (rateType === 'per mt' || rateType === 'fixed') &&
+        Number.isFinite(transporterRate) &&
+        Number.isFinite(liftingQty) &&
+        liftingQty !== 0
+      ) ? roundTo(transporterRate / liftingQty, 2) : 0;
+    }
   });
 
-  const [productionUsageMap, semi, crushing] = await Promise.all([
+  const [productionUsageMap, semi, crushing, productTabRateMap] = await Promise.all([
     buildProductionUsageMap(selectedDate),
     buildSemiFinishedActualLevelMap(selectedDate),
     buildCrushingActualLevelMap(selectedDate),
+    buildProductTabRateMap(),
   ]);
 
   Object.entries(productionUsageMap).forEach(([key, qty]) => {
@@ -336,7 +464,74 @@ const buildLiftDataMaps = async (selectedDate: string) => {
     actualQuantityMap[key] = (actualQuantityMap[key] || 0) + qty;
   });
 
-  return { actualQuantityMap };
+  // Merge base + transportation rate — used only when resolving semi-finished component costs.
+  const ratesMap: Record<string, number> = {};
+  Object.keys(poRatesMap).forEach((key) => {
+    ratesMap[key] = poRatesMap[key] + (transportingRatesMap[key] || 0);
+  });
+  Object.keys(transportingRatesMap).forEach((key) => {
+    if (ratesMap[key] === undefined) ratesMap[key] = transportingRatesMap[key];
+  });
+
+  // Derived Product Rate for semi-finished items (e.g. P-14 Green, P14 Clinker) that have no
+  // rate of their own in LIFT-ACCOUNTS or the Product tab — computed from their components.
+  const derivedSemiRatesMap: Record<string, number> = {};
+  const componentsMap = semi.latestSemiComponentsMap;
+  if (componentsMap && Object.keys(componentsMap).length > 0) {
+    for (let pass = 0; pass < 3; pass++) {
+      let changed = false;
+      Object.entries(componentsMap).forEach(([key, data]) => {
+        if (data.components.length === 0 && data.processingCost === 0) return;
+        // "<Base> Fines" items are already priced on the frontend (grain sibling's rate +
+        // its own processing cost) — skip so this component-only rate (which excludes
+        // processing cost) doesn't get handed out as if it were a complete rate for them.
+        if (key.split('::')[1]?.endsWith('fines')) return;
+        const firmKey = key.split('::')[0];
+
+        let totalCost = 0;
+        let solidQty = 0;
+        let totalQty = 0;
+        let hasValidComponentRate = false;
+
+        data.components.forEach((comp) => {
+          const rmFullKey = `${firmKey}::${comp.rmKey}`;
+          let rmRate = ratesMap[rmFullKey] !== undefined
+            ? ratesMap[rmFullKey]
+            : (poRatesMap[rmFullKey] !== undefined
+              ? poRatesMap[rmFullKey]
+              : (productTabRateMap[rmFullKey] !== undefined
+                ? productTabRateMap[rmFullKey]
+                : (derivedSemiRatesMap[rmFullKey] !== undefined ? derivedSemiRatesMap[rmFullKey] : 0)));
+
+          // If component is itself a semi-finished product, include its processing cost.
+          if (derivedSemiRatesMap[rmFullKey] !== undefined) {
+            const compProcCost = componentsMap[rmFullKey]?.processingCost || 0;
+            rmRate = Number(rmRate || 0) + compProcCost;
+          }
+
+          const numericRate = Number(rmRate || 0);
+          if (numericRate > 0) hasValidComponentRate = true;
+          totalCost += comp.qty * numericRate;
+
+          const isFuel = comp.rmKey.includes('diesel') || comp.rmKey.includes('fuel') || comp.rmKey.includes('oil');
+          if (!isFuel) solidQty += comp.qty;
+          totalQty += comp.qty;
+        });
+
+        const divisorQty = solidQty > 0 ? solidQty : totalQty;
+        if (hasValidComponentRate && divisorQty > 0) {
+          const calcRate = roundTo(totalCost / divisorQty, 2);
+          if (derivedSemiRatesMap[key] !== calcRate) {
+            derivedSemiRatesMap[key] = calcRate;
+            changed = true;
+          }
+        }
+      });
+      if (!changed) break;
+    }
+  }
+
+  return { actualQuantityMap, poRatesMap, transportingRatesMap, productTabRateMap, derivedSemiRatesMap };
 };
 
 // --- finished goods source maps -------------------------------------------
@@ -547,6 +742,8 @@ const buildFinishedGoodAdjustmentMap = async (selectedDate: string) => {
 
 const snapshotRawMaterial = async (snapshotDate: string, selectedDate: string) => {
   const [masters, lift, salesRawOrders, adjustmentRows] = await Promise.all([
+    // inventory_master has no product_rate column of its own — the fallback below
+    // (item.product_rate ?? '') is therefore always '' in practice, same as api.js.
     fetchAll(db().inventoryDb, 'inventory_master', 'id, firm_name, item_name, unit, op_stock, optimum_qty, max_qty'),
     buildLiftDataMaps(selectedDate),
     // Left as * — api.js falls back across completed_at/updated_at/created_at/
@@ -586,7 +783,8 @@ const snapshotRawMaterial = async (snapshotDate: string, selectedDate: string) =
   return masters.map((item) => {
     const key = `${normalizeFirmKey(item.firm_name)}::${normalizeItemKey(item.item_name)}`;
     const opStock = numberOrZero(item.op_stock);
-    let actualLevel: number | '' = lift.actualQuantityMap[key] ?? '';
+    const rawActual = lift.actualQuantityMap[key] as number | undefined;
+    let actualLevel: number | '' = rawActual ?? '';
     const salesRawQty = salesRawQtyMap[key] || 0;
     if (actualLevel !== '' || salesRawQty !== 0 || opStock !== 0) {
       actualLevel = opStock + Number(actualLevel || 0) - salesRawQty;
@@ -597,6 +795,24 @@ const snapshotRawMaterial = async (snapshotDate: string, selectedDate: string) =
     const adjAfter = (adjustmentAfter[`${plainFirm}::${plainItem}`] || 0) + (adjustmentAfter[`*::${plainItem}`] || 0);
     const adjustedLevel: number | null = actualLevel !== '' ? Number(actualLevel) + adjAfter : null;
 
+    // Product Rate: LIFT-ACCOUNTS latest rate, else the Stock Adjustment Products-tab
+    // rate, else the derived semi-finished rate, else inventory_master.product_rate —
+    // then add the per-MT transportation rate. Mirrors the Raw Material screen exactly.
+    const baseRate = lift.poRatesMap[key] !== undefined
+      ? lift.poRatesMap[key]
+      : (lift.productTabRateMap[key] !== undefined
+        ? lift.productTabRateMap[key]
+        : (lift.derivedSemiRatesMap[key] !== undefined
+          ? lift.derivedSemiRatesMap[key]
+          : (item.product_rate ?? '')));
+    const transRate = lift.transportingRatesMap[key] || 0;
+    let productRate: number | null = null;
+    if (baseRate !== '') {
+      productRate = Number(baseRate) + transRate;
+    } else if (transRate > 0) {
+      productRate = transRate;
+    }
+
     // Only the columns the History page reads are stored. optimum_qty/max_qty
     // ride along because the page tints each cell against them.
     return {
@@ -605,6 +821,7 @@ const snapshotRawMaterial = async (snapshotDate: string, selectedDate: string) =
       item_name: item.item_name,
       unit: item.unit ?? '',
       actual_level: adjustedLevel,
+      product_rate: productRate,
       optimum_qty: item.optimum_qty ?? null,
       max_qty: item.max_qty ?? null,
     };
