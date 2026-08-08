@@ -81,6 +81,8 @@ const BranchInventory = () => {
   const [prodBreakdownItem, setProdBreakdownItem] = useState(null);
   const [rateBreakdownModalOpen, setRateBreakdownModalOpen] = useState(false);
   const [rateBreakdownItem, setRateBreakdownItem] = useState(null);
+  const [purchaseBreakdownModalOpen, setPurchaseBreakdownModalOpen] = useState(false);
+  const [purchaseBreakdownItem, setPurchaseBreakdownItem] = useState(null);
   
   // Transfers logs
   const [transferRequests, setTransferRequests] = useState([]);
@@ -586,11 +588,22 @@ const BranchInventory = () => {
     },
     { header: 'OP. Stock', accessor: 'op_stock', render: (row) => renderRawNumber(row.op_stock) },
     { header: 'Stock Adjustment', accessor: 'stock_adjustment', render: (row) => renderRawNumber(row.stock_adjustment) },
-    { 
-      header: 'Purchase System', 
-      accessor: 'purchase_system', 
-      cellClassName: (row) => getTintedCellClass(row.purchase_system, 'emerald'),
-      render: (row) => renderRawNumber(row.purchase_system)
+    {
+      header: 'Purchase System',
+      accessor: 'purchase_system',
+      cellClassName: (row) => getTintedCellClass(Number(row.purchase_system || 0) - Number(row.purchase_return || 0), 'emerald'),
+      render: (row) => (
+        <button
+          onClick={() => {
+            setPurchaseBreakdownItem(row);
+            setPurchaseBreakdownModalOpen(true);
+          }}
+          className="w-full text-center font-semibold cursor-pointer hover:opacity-80 transition-opacity underline-offset-2 hover:underline"
+          title="Click to see purchase & purchase return breakdown"
+        >
+          {renderRawNumber(Number(row.purchase_system || 0) - Number(row.purchase_return || 0))}
+        </button>
+      )
     },
     { 
       header: 'Production Consumption', 
@@ -1079,14 +1092,14 @@ const BranchInventory = () => {
               </span>
             )}
           </h2>
-          <p className="text-xs text-slate-400 mt-1">
+          <p className="text-xs text-black mt-1">
             Realtime database entries synced for the {activeBranch === 'All' ? 'all firms' : activeBranch} {isFinishGood ? 'finish goods' : 'raw materials'} stocks.
           </p>
         </div>
         <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto items-start sm:items-center">
           {isFinishGood && (
             <div className="flex items-center gap-2">
-              <span className="text-xs text-slate-400 font-medium shrink-0">Opening Stock Date:</span>
+              <span className="text-xs text-black font-medium shrink-0">Opening Stock Date:</span>
               <input
                 type="date"
                 min={INVENTORY_START_DATE}
@@ -1891,6 +1904,94 @@ const BranchInventory = () => {
               onClick={() => {
                 setProdBreakdownModalOpen(false);
                 setProdBreakdownItem(null);
+              }}
+              className="px-4 py-2.5 rounded-lg bg-emerald-700 text-white text-xs font-semibold hover:bg-emerald-600 cursor-pointer transition-colors"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        isOpen={purchaseBreakdownModalOpen}
+        onClose={() => {
+          setPurchaseBreakdownModalOpen(false);
+          setPurchaseBreakdownItem(null);
+        }}
+        title={`Purchase System: ${purchaseBreakdownItem?.item_name || ''}`}
+      >
+        <div className="space-y-4 text-slate-300">
+
+          {/* Header: Item + Firm + Net — same card style as the page */}
+          <div className="flex items-center justify-between gap-4 px-4 py-3 rounded-xl bg-slate-900/60 border border-slate-800 backdrop-blur-md">
+            <div>
+              <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Item</div>
+              <div className="text-sm font-bold text-slate-100 mt-0.5">{purchaseBreakdownItem?.item_name || '-'}</div>
+            </div>
+            <div>
+              <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Firm</div>
+              <div className="text-sm font-bold text-slate-100 mt-0.5">{purchaseBreakdownItem?.firm_name || '-'}</div>
+            </div>
+            <div className="text-right">
+              <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Net Total</div>
+              <div className={`text-base font-black mt-0.5 ${(Number(purchaseBreakdownItem?.purchase_system || 0) - Number(purchaseBreakdownItem?.purchase_return || 0)) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                {(Number(purchaseBreakdownItem?.purchase_system || 0) - Number(purchaseBreakdownItem?.purchase_return || 0)).toLocaleString(undefined, { maximumFractionDigits: 3 })}
+              </div>
+            </div>
+          </div>
+
+          {/* Purchase vs Purchase Return breakdown table — same styling as Production Consumption */}
+          <div className="overflow-x-auto rounded-xl border border-slate-800 bg-slate-900/30 backdrop-blur-md">
+            <table className="w-full border-collapse text-center text-xs text-slate-300 min-w-[360px]">
+              <thead className="bg-slate-900 uppercase tracking-wider text-slate-400 border-b border-slate-800 sticky top-0 z-10">
+                <tr>
+                  <th className="px-4 py-2.5 font-semibold text-slate-400 w-[50%]">Category</th>
+                  <th className="px-4 py-2.5 font-semibold text-emerald-400">Quantity</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-800/60">
+
+                <tr className="hover:bg-slate-800/10 transition-colors duration-150">
+                  <td className="px-4 py-2 text-slate-400 font-medium whitespace-nowrap">Purchase (+)</td>
+                  <td className={`px-4 py-2 font-semibold whitespace-nowrap ${Number(purchaseBreakdownItem?.purchase_system || 0) > 0 ? 'text-emerald-400' : 'text-slate-600'}`}>
+                    {Number(purchaseBreakdownItem?.purchase_system || 0) !== 0
+                      ? Number(purchaseBreakdownItem.purchase_system).toLocaleString(undefined, { maximumFractionDigits: 3 })
+                      : '—'}
+                  </td>
+                </tr>
+
+                <tr className="hover:bg-slate-800/10 transition-colors duration-150">
+                  <td className="px-4 py-2 text-slate-400 font-medium whitespace-nowrap">Purchase Return (−)</td>
+                  <td className={`px-4 py-2 font-semibold whitespace-nowrap ${Number(purchaseBreakdownItem?.purchase_return || 0) > 0 ? 'text-rose-400' : 'text-slate-600'}`}>
+                    {Number(purchaseBreakdownItem?.purchase_return || 0) !== 0
+                      ? Number(purchaseBreakdownItem.purchase_return).toLocaleString(undefined, { maximumFractionDigits: 3 })
+                      : '—'}
+                  </td>
+                </tr>
+
+                {/* Net Total Row — highlighted like a footer */}
+                {(() => {
+                  const netVal = Number(purchaseBreakdownItem?.purchase_system || 0) - Number(purchaseBreakdownItem?.purchase_return || 0);
+                  return (
+                    <tr className="border-t-2 border-emerald-800/60 bg-emerald-950/20">
+                      <td className="px-4 py-3 font-bold text-emerald-300 uppercase tracking-wider text-[11px] whitespace-nowrap">Net Total</td>
+                      <td className={`px-4 py-3 font-black text-sm whitespace-nowrap ${netVal < 0 ? 'text-rose-400' : netVal > 0 ? 'text-emerald-400' : 'text-slate-500'}`}>
+                        {netVal !== 0 ? netVal.toLocaleString(undefined, { maximumFractionDigits: 3 }) : '—'}
+                      </td>
+                    </tr>
+                  );
+                })()}
+
+              </tbody>
+            </table>
+          </div>
+
+          <div className="pt-2 border-t border-slate-800 flex justify-end">
+            <button
+              onClick={() => {
+                setPurchaseBreakdownModalOpen(false);
+                setPurchaseBreakdownItem(null);
               }}
               className="px-4 py-2.5 rounded-lg bg-emerald-700 text-white text-xs font-semibold hover:bg-emerald-600 cursor-pointer transition-colors"
             >

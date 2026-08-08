@@ -18,7 +18,6 @@ const normalizeFirmName = (value) => value === 'Madhya' ? 'Pmmpl' : value;
 const STOCK_ADJUSTMENT_TAB_KEYS = {
   adjustments: 'StockAdjustmentTab_Adjustments',
   op_stock: 'StockAdjustmentTab_OpStock',
-  products: 'StockAdjustmentTab_Products',
 };
 
 const defaultFormValues = {
@@ -30,13 +29,6 @@ const defaultFormValues = {
   status: 'Factory +'
 };
 
-const productRateDefaultValues = {
-  materialType: 'raw_material',
-  firmName: '',
-  itemName: '',
-  rate: ''
-};
-
 const StockAdjustment = () => {
   const { showSuccess, showError } = useToast();
   const { user } = useAuth();
@@ -46,18 +38,17 @@ const StockAdjustment = () => {
   const [finishItemOptions, setFinishItemOptions] = useState([]);
   const [rawMaterialOpStockRows, setRawMaterialOpStockRows] = useState([]);
   const [finishGoodOpStockRows, setFinishGoodOpStockRows] = useState([]);
-  const [productRateRows, setProductRateRows] = useState([]);
-  const [productRateLoading, setProductRateLoading] = useState(false);
   const [loading, setLoading] = useState(false);
   const [rawEntryFormOpen, setRawEntryFormOpen] = useState(false);
   const [finishEntryFormOpen, setFinishEntryFormOpen] = useState(false);
   const [opStockFormOpen, setOpStockFormOpen] = useState(false);
-  const [productRateFormOpen, setProductRateFormOpen] = useState(false);
   const [editingOpStockRow, setEditingOpStockRow] = useState(null);
   const [editingAdjustment, setEditingAdjustment] = useState(null);
-  const [editingProductRate, setEditingProductRate] = useState(null);
   const [opStockMaterialType, setOpStockMaterialType] = useState('finish_good');
   const [newProductFormOpen, setNewProductFormOpen] = useState(false);
+  const [tradingItemOptions, setTradingItemOptions] = useState([]);
+  const [tradingMaterialOpStockRows, setTradingMaterialOpStockRows] = useState([]);
+  const [tradingEntryFormOpen, setTradingEntryFormOpen] = useState(false);
 
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(100);
@@ -129,20 +120,20 @@ const StockAdjustment = () => {
   } = useForm({ defaultValues: defaultFormValues });
 
   const {
+    register: registerTrading,
+    handleSubmit: handleTradingSubmit,
+    reset: resetTrading,
+    watch: watchTrading,
+    formState: { errors: errorsTrading }
+  } = useForm({ defaultValues: defaultFormValues });
+
+  const {
     register: registerOpStock,
     handleSubmit: handleOpStockSubmit,
     reset: resetOpStock,
     watch: watchOpStock,
     formState: { errors: errorsOpStock }
   } = useForm({ defaultValues: defaultFormValues });
-
-  const {
-    register: registerProductRate,
-    handleSubmit: handleProductRateSubmit,
-    reset: resetProductRate,
-    watch: watchProductRate,
-    formState: { errors: errorsProductRate }
-  } = useForm({ defaultValues: productRateDefaultValues });
 
   const {
     register: registerNewProduct,
@@ -166,21 +157,16 @@ const StockAdjustment = () => {
 
   const selectedRawFirm = watchRaw('firmName');
   const selectedFinishFirm = watchFinish('firmName');
+  const selectedTradingFirm = watchTrading('firmName');
   const selectedOpStockFirm = watchOpStock('firmName');
-  const selectedProductRateFirm = watchProductRate('firmName');
-  const selectedProductRateType = watchProductRate('materialType');
   const selectedNewProductType = watchNewProduct('materialType');
 
   useEffect(() => {
     if (!user) return;
     fetchRawMaterialItems();
     fetchFinishGoodItems();
+    fetchTradingMaterialItems();
   }, [user]);
-
-  useEffect(() => {
-    if (!user) return;
-    fetchProductRates();
-  }, [user, accessibleFirms]);
 
   useEffect(() => {
     if (!user) return;
@@ -232,31 +218,6 @@ const StockAdjustment = () => {
     }
   };
 
-  const fetchProductRates = async () => {
-    setProductRateLoading(true);
-    try {
-      let query = supabase
-        .from('stock_adjustment')
-        .select('id, firm_name, item_name, material_type, rate, created_at')
-        .not('rate', 'is', null)
-        .order('created_at', { ascending: false });
-
-      query = restrictQueryToAccessibleFirms(query);
-
-      const { data, error } = await query;
-
-      if (error) throw error;
-      setProductRateRows((data || []).map(row => ({
-        ...row,
-        firm_name: normalizeFirmName(row.firm_name)
-      })));
-    } catch (e) {
-      showError(e.message || 'Failed to load product rates.');
-    } finally {
-      setProductRateLoading(false);
-    }
-  };
-
   const fetchRawMaterialItems = async () => {
     try {
       const query = supabase
@@ -304,6 +265,26 @@ const StockAdjustment = () => {
     }
   };
 
+  const fetchTradingMaterialItems = async () => {
+    try {
+      const query = supabase
+        .from('trading_material_master')
+        .select('id, firm_name, product_name, op_stock, op_stock_date')
+        .order('firm_name', { ascending: true })
+        .order('product_name', { ascending: true });
+      const { data, error } = await restrictQueryToAccessibleFirms(query);
+
+      if (error) throw error;
+      const tradingMaterialRows = (data || [])
+        .map(item => ({ ...item, firm_name: normalizeFirmName(item.firm_name) }))
+        .filter(item => item.firm_name && item.product_name);
+      setTradingItemOptions(tradingMaterialRows);
+      setTradingMaterialOpStockRows(tradingMaterialRows);
+    } catch (e) {
+      showError(e.message || 'Failed to load trading material names.');
+    }
+  };
+
   const filteredRawItemOptions = useMemo(
     () => rawItemOptions
       .filter(item => !selectedRawFirm || item.firm_name === selectedRawFirm)
@@ -322,22 +303,22 @@ const StockAdjustment = () => {
     [finishItemOptions, selectedFinishFirm]
   );
 
+  const filteredTradingItemOptions = useMemo(
+    () => tradingItemOptions
+      .filter(item => !selectedTradingFirm || item.firm_name === selectedTradingFirm)
+      .map(item => item.product_name)
+      .filter((productName, index, products) => products.indexOf(productName) === index)
+      .sort((a, b) => a.localeCompare(b)),
+    [tradingItemOptions, selectedTradingFirm]
+  );
+
   const filteredOpStockItemOptions = useMemo(
-    () => (opStockMaterialType === 'raw_material' ? rawItemOptions : finishItemOptions)
+    () => (opStockMaterialType === 'raw_material' ? rawItemOptions : opStockMaterialType === 'finish_good' ? finishItemOptions : tradingItemOptions)
       .filter(item => !selectedOpStockFirm || item.firm_name === selectedOpStockFirm)
       .map(item => opStockMaterialType === 'raw_material' ? item.item_name : item.product_name)
       .filter((itemName, index, items) => items.indexOf(itemName) === index)
       .sort((a, b) => a.localeCompare(b)),
-    [finishItemOptions, opStockMaterialType, rawItemOptions, selectedOpStockFirm]
-  );
-
-  const filteredProductRateItemOptions = useMemo(
-    () => (selectedProductRateType === 'raw_material' ? rawItemOptions : finishItemOptions)
-      .filter(item => !selectedProductRateFirm || item.firm_name === selectedProductRateFirm)
-      .map(item => selectedProductRateType === 'raw_material' ? item.item_name : item.product_name)
-      .filter((itemName, index, items) => items.indexOf(itemName) === index)
-      .sort((a, b) => a.localeCompare(b)),
-    [finishItemOptions, rawItemOptions, selectedProductRateFirm, selectedProductRateType]
+    [finishItemOptions, opStockMaterialType, rawItemOptions, tradingItemOptions, selectedOpStockFirm]
   );
 
   const savedOpStockRows = useMemo(() => [
@@ -356,8 +337,16 @@ const StockAdjustment = () => {
         material_type: 'finish_good',
         material_label: 'Finished Good',
         display_name: row.product_name
+      })),
+    ...tradingMaterialOpStockRows
+      .filter(row => row.op_stock_date)
+      .map(row => ({
+        ...row,
+        material_type: 'trading_material',
+        material_label: 'Trading Material',
+        display_name: row.product_name
       }))
-  ], [finishGoodOpStockRows, rawMaterialOpStockRows]);
+  ], [finishGoodOpStockRows, rawMaterialOpStockRows, tradingMaterialOpStockRows]);
 
   const allProductsRows = useMemo(() => [
     ...rawMaterialOpStockRows.map(row => ({
@@ -371,8 +360,14 @@ const StockAdjustment = () => {
       material_type: 'finish_good',
       material_label: 'Finished Good',
       display_name: row.product_name
+    })),
+    ...tradingMaterialOpStockRows.map(row => ({
+      ...row,
+      material_type: 'trading_material',
+      material_label: 'Trading Material',
+      display_name: row.product_name
     }))
-  ], [finishGoodOpStockRows, rawMaterialOpStockRows]);
+  ], [finishGoodOpStockRows, rawMaterialOpStockRows, tradingMaterialOpStockRows]);
 
   const onRawEntrySubmit = async (data) => {
     try {
@@ -458,21 +453,64 @@ const StockAdjustment = () => {
     }
   };
 
+  const onTradingEntrySubmit = async (data) => {
+    try {
+      if (editingAdjustment) {
+        const { error } = await supabase
+          .from('stock_adjustment')
+          .update({
+            entry_date: data.date,
+            firm_name: data.firmName,
+            item_name: data.itemName,
+            qty: Number(data.qty),
+            remark: data.remark || null,
+            status: data.status
+          })
+          .eq('id', editingAdjustment.id);
+
+        if (error) throw error;
+        showSuccess('Trading material factory entry updated successfully.');
+      } else {
+        const { error } = await supabase
+          .from('stock_adjustment')
+          .insert([{
+            entry_date: data.date,
+            firm_name: data.firmName,
+            item_name: data.itemName,
+            material_type: 'trading_material',
+            qty: Number(data.qty),
+            remark: data.remark || null,
+            status: data.status
+          }]);
+
+        if (error) throw error;
+        showSuccess('Trading material factory entry saved successfully.');
+      }
+      fetchStockAdjustments();
+      resetTrading(defaultFormValues);
+      setTradingEntryFormOpen(false);
+      setEditingAdjustment(null);
+    } catch (e) {
+      showError(e.message || 'Failed to save trading material factory entry.');
+    }
+  };
+
   const onOpStockSubmit = async (data) => {
     try {
       const isRawMaterial = opStockMaterialType === 'raw_material';
-      const sourceRows = isRawMaterial ? rawMaterialOpStockRows : finishGoodOpStockRows;
+      const isFinishGood = opStockMaterialType === 'finish_good';
+      const sourceRows = isRawMaterial ? rawMaterialOpStockRows : isFinishGood ? finishGoodOpStockRows : tradingMaterialOpStockRows;
       const targetRow = editingOpStockRow || sourceRows.find(row =>
         row.firm_name === data.firmName
         && (isRawMaterial ? row.item_name : row.product_name) === data.itemName
       );
 
       if (!targetRow) {
-        throw new Error(`Selected ${isRawMaterial ? 'raw material' : 'finished good'} was not found.`);
+        throw new Error(`Selected material was not found.`);
       }
 
       const { error } = await supabase
-        .from(isRawMaterial ? 'inventory_master' : 'finished_goods_inventory_master')
+        .from(isRawMaterial ? 'inventory_master' : isFinishGood ? 'finished_goods_inventory_master' : 'trading_material_master')
         .update({
           op_stock: Number(data.qty),
           op_stock_date: data.date
@@ -481,11 +519,13 @@ const StockAdjustment = () => {
 
       if (error) throw error;
 
-      showSuccess(`${isRawMaterial ? 'Raw material' : 'Finished good'} OP Stock ${editingOpStockRow ? 'updated' : 'saved'} successfully.`);
+      showSuccess(`OP Stock ${editingOpStockRow ? 'updated' : 'saved'} successfully.`);
       if (isRawMaterial) {
         await fetchRawMaterialItems();
-      } else {
+      } else if (isFinishGood) {
         await fetchFinishGoodItems();
+      } else {
+        await fetchTradingMaterialItems();
       }
       resetOpStock(defaultFormValues);
       setEditingOpStockRow(null);
@@ -493,61 +533,6 @@ const StockAdjustment = () => {
     } catch (e) {
       showError(e.message || 'Failed to save OP Stock.');
     }
-  };
-
-  const onProductRateSubmit = async (data) => {
-    try {
-      if (editingProductRate) {
-        const { error } = await supabase
-          .from('stock_adjustment')
-          .update({
-            firm_name: data.firmName,
-            item_name: data.itemName,
-            material_type: data.materialType,
-            rate: Number(data.rate)
-          })
-          .eq('id', editingProductRate.id);
-
-        if (error) throw error;
-        showSuccess('Product rate updated successfully.');
-      } else {
-        const { error } = await supabase
-          .from('stock_adjustment')
-          .insert([{
-            entry_date: new Date().toISOString().split('T')[0],
-            firm_name: data.firmName,
-            item_name: data.itemName,
-            material_type: data.materialType,
-            rate: Number(data.rate)
-          }]);
-
-        if (error) throw error;
-        showSuccess('Product rate saved successfully.');
-      }
-      fetchProductRates();
-      resetProductRate({ ...productRateDefaultValues, firmName: defaultFirmName });
-      setProductRateFormOpen(false);
-      setEditingProductRate(null);
-    } catch (e) {
-      showError(e.message || 'Failed to save product rate.');
-    }
-  };
-
-  const openProductRateForm = () => {
-    setEditingProductRate(null);
-    resetProductRate({ ...productRateDefaultValues, firmName: defaultFirmName });
-    setProductRateFormOpen(true);
-  };
-
-  const openEditProductRateForm = (row) => {
-    setEditingProductRate(row);
-    resetProductRate({
-      materialType: row.material_type,
-      firmName: row.firm_name,
-      itemName: row.item_name,
-      rate: row.rate
-    });
-    setProductRateFormOpen(true);
   };
 
   const openEditProductForm = (row) => {
@@ -572,7 +557,7 @@ const StockAdjustment = () => {
     }
 
     try {
-      const table = row.material_type === 'raw_material' ? 'inventory_master' : 'finished_goods_inventory_master';
+      const table = row.material_type === 'raw_material' ? 'inventory_master' : row.material_type === 'finish_good' ? 'finished_goods_inventory_master' : 'trading_material_master';
       const { error } = await supabase.from(table).delete().eq('id', row.id);
 
       if (error) throw error;
@@ -580,8 +565,10 @@ const StockAdjustment = () => {
       showSuccess('Product deleted successfully.');
       if (row.material_type === 'raw_material') {
         await fetchRawMaterialItems();
-      } else {
+      } else if (row.material_type === 'finish_good') {
         await fetchFinishGoodItems();
+      } else {
+        await fetchTradingMaterialItems();
       }
     } catch (e) {
       showError(e.message || 'Failed to delete product.');
@@ -604,7 +591,7 @@ const StockAdjustment = () => {
           ...(editingNewProduct ? {} : { op_stock: 0, op_stock_date: null })
         };
 
-        const table = data.materialType === 'raw_material' ? 'inventory_master' : 'finished_goods_inventory_master';
+        const table = data.materialType === 'raw_material' ? 'inventory_master' : data.materialType === 'finish_good' ? 'finished_goods_inventory_master' : 'trading_material_master';
 
       if (editingNewProduct) {
         const { error } = await supabase.from(table).update(payload).eq('id', editingNewProduct.id);
@@ -618,8 +605,10 @@ const StockAdjustment = () => {
 
       if (data.materialType === 'raw_material') {
         await fetchRawMaterialItems();
-      } else {
+      } else if (data.materialType === 'finish_good') {
         await fetchFinishGoodItems();
+      } else {
+        await fetchTradingMaterialItems();
       }
 
       resetNewProduct({
@@ -637,26 +626,6 @@ const StockAdjustment = () => {
       setEditingNewProduct(null);
     } catch (e) {
       showError(e.message || 'Failed to save product.');
-    }
-  };
-
-  const handleDeleteProductRate = async (row) => {
-    if (!window.confirm(`Remove product rate for ${row.item_name}?`)) {
-      return;
-    }
-
-    try {
-      const { error } = await supabase
-        .from('stock_adjustment')
-        .delete()
-        .eq('id', row.id);
-
-      if (error) throw error;
-
-      showSuccess('Product rate removed successfully.');
-      fetchProductRates();
-    } catch (e) {
-      showError(e.message || 'Failed to remove product rate.');
     }
   };
 
@@ -698,6 +667,16 @@ const StockAdjustment = () => {
         status: row.status
       });
       setRawEntryFormOpen(true);
+    } else if (row.material_type === 'trading_material') {
+      resetTrading({
+        date: row.entry_date,
+        firmName: row.firm_name,
+        itemName: row.item_name,
+        qty: row.qty,
+        remark: row.remark || '',
+        status: row.status
+      });
+      setTradingEntryFormOpen(true);
     } else {
       resetFinish({
         date: row.entry_date,
@@ -732,15 +711,14 @@ const StockAdjustment = () => {
   };
 
   const handleDeleteOpStock = async (row) => {
-    const materialLabel = row.material_type === 'raw_material' ? 'raw material' : 'finished good';
-    if (!window.confirm(`Remove OP. Stock for ${row.display_name}? The ${materialLabel} master item will remain unchanged.`)) {
+    if (!window.confirm(`Remove OP. Stock for ${row.display_name}? The master item will remain unchanged.`)) {
       return;
     }
 
     try {
       const tableName = row.material_type === 'raw_material'
         ? 'inventory_master'
-        : 'finished_goods_inventory_master';
+        : row.material_type === 'finish_good' ? 'finished_goods_inventory_master' : 'trading_material_master';
       const { error } = await supabase
         .from(tableName)
         .update({
@@ -754,8 +732,10 @@ const StockAdjustment = () => {
       showSuccess('OP Stock removed successfully.');
       if (row.material_type === 'raw_material') {
         await fetchRawMaterialItems();
-      } else {
+      } else if (row.material_type === 'finish_good') {
         await fetchFinishGoodItems();
+      } else {
+        await fetchTradingMaterialItems();
       }
     } catch (e) {
       showError(e.message || 'Failed to remove OP Stock.');
@@ -780,7 +760,7 @@ const StockAdjustment = () => {
       header: 'Type',
       accessor: 'material_type',
       render: (row) => {
-        return row.material_type === 'finish_good' ? 'Finish Good' : 'Raw Material';
+        return row.material_type === 'finish_good' ? 'Finish Good' : row.material_type === 'trading_material' ? 'Trading Material' : 'Raw Material';
       }
     },
     { header: 'Qty', accessor: 'qty', render: (row) => Number(row.qty).toLocaleString('en-IN') },
@@ -817,48 +797,6 @@ const StockAdjustment = () => {
           <button
             type="button"
             onClick={() => handleDeleteAdjustment(row)}
-            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-rose-600/20 text-red-600 hover:bg-rose-600 hover:text-white transition-colors cursor-pointer"
-          >
-            <Trash2 className="w-3.5 h-3.5" />
-            Delete
-          </button>
-        </div>
-      )
-    }
-  ];
-
-  const productRateColumns = [
-    {
-      header: 'Type',
-      accessor: 'material_type',
-      render: (row) => row.material_type === 'finish_good' ? 'Finished Good' : 'Raw Material'
-    },
-    { header: 'Firm Name', accessor: 'firm_name', render: (row) => row.firm_name || '-' },
-    { header: 'Item / Product Name', accessor: 'item_name' },
-    {
-      header: 'Product Rate',
-      accessor: 'rate',
-      render: (row) => row.rate !== null && row.rate !== undefined
-        ? Number(row.rate).toLocaleString('en-IN', { maximumFractionDigits: 3 })
-        : '-'
-    },
-    {
-      header: 'Action',
-      accessor: '',
-      sortable: false,
-      render: (row) => (
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => openEditProductRateForm(row)}
-            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-indigo-600/20 text-indigo-300 hover:bg-indigo-600 hover:text-white transition-colors cursor-pointer"
-          >
-            <Edit3 className="w-3.5 h-3.5" />
-            Edit
-          </button>
-          <button
-            type="button"
-            onClick={() => handleDeleteProductRate(row)}
             className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-rose-600/20 text-red-600 hover:bg-rose-600 hover:text-white transition-colors cursor-pointer"
           >
             <Trash2 className="w-3.5 h-3.5" />
@@ -1022,85 +960,6 @@ const StockAdjustment = () => {
     </form>
   );
 
-  const renderProductRateForm = () => (
-    <form onSubmit={handleProductRateSubmit(onProductRateSubmit)} className="space-y-4">
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <div className="space-y-1">
-          <label className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider pl-0.5">Type</label>
-          <select
-            {...registerProductRate('materialType', { required: true })}
-            className="w-full px-3 py-2.5 text-xs rounded-lg glass-input bg-slate-900"
-          >
-            <option value="raw_material">Raw Material</option>
-            <option value="finish_good">Finished Good</option>
-          </select>
-        </div>
-
-        <div className="space-y-1">
-          <label className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider pl-0.5">Firm Name</label>
-          <select
-            {...registerProductRate('firmName', { required: 'Firm name is required' })}
-            className="w-full px-3 py-2.5 text-xs rounded-lg glass-input bg-slate-900"
-          >
-            <option value="">Select firm...</option>
-            {accessibleFirms.map(firmName => (
-              <option key={firmName} value={firmName}>{firmName}</option>
-            ))}
-          </select>
-          {errorsProductRate.firmName && <span className="text-[10px] text-rose-400 font-medium">{errorsProductRate.firmName.message}</span>}
-        </div>
-
-        <div className="space-y-1">
-          <label className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider pl-0.5">Item / Product Name</label>
-          <select
-            {...registerProductRate('itemName', { required: 'Item / Product name is required' })}
-            className="w-full px-3 py-2.5 text-xs rounded-lg glass-input bg-slate-900"
-          >
-            <option value="">Select item...</option>
-            {filteredProductRateItemOptions.map(itemName => (
-              <option key={itemName} value={itemName}>{itemName}</option>
-            ))}
-          </select>
-          {errorsProductRate.itemName && <span className="text-[10px] text-rose-400 font-medium">{errorsProductRate.itemName.message}</span>}
-        </div>
-
-        <div className="space-y-1">
-          <label className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider pl-0.5">Product Rate</label>
-          <input
-            type="number"
-            step="any"
-            placeholder="0"
-            {...registerProductRate('rate', {
-              required: 'Product rate is required',
-              min: { value: 0.000001, message: 'Product rate must be greater than 0' }
-            })}
-            className="w-full px-3 py-2.5 text-xs rounded-lg glass-input"
-          />
-          {errorsProductRate.rate && <span className="text-[10px] text-rose-400 font-medium">{errorsProductRate.rate.message}</span>}
-        </div>
-      </div>
-
-      <div className="pt-3 border-t border-slate-800 flex justify-end gap-3 text-xs">
-        <button
-          type="button"
-          onClick={() => {
-            setProductRateFormOpen(false);
-            setEditingProductRate(null);
-          }}
-          className="px-4 py-2.5 rounded-lg bg-slate-800 text-slate-400 hover:text-slate-200 cursor-pointer"
-        >
-          Cancel
-        </button>
-        <button
-          type="submit"
-          className="px-4 py-2.5 rounded-lg bg-indigo-600 text-white font-semibold hover:bg-indigo-500 cursor-pointer"
-        >
-          {editingProductRate ? 'Update Product Rate' : 'Add Product Rate'}
-        </button>
-      </div>
-    </form>
-  );
-
   return (
     <div className="space-y-6 w-full p-1.5 animate-slide-up">
       <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
@@ -1109,7 +968,7 @@ const StockAdjustment = () => {
             <SlidersHorizontal className="w-5 h-5 text-indigo-400" />
             <span>Stock Adjustment</span>
           </h2>
-          <p className="text-xs text-slate-400 mt-1">
+          <p className="text-xs text-black mt-1">
             Factory adjustment entries for raw materials and finish goods.
           </p>
         </div>
@@ -1135,6 +994,16 @@ const StockAdjustment = () => {
               <PackagePlus className="w-4.5 h-4.5" />
               <span>Finish Good Form</span>
             </button>
+            <button
+              onClick={() => {
+                resetTrading(getDefaultFormValues());
+                setTradingEntryFormOpen(true);
+              }}
+              className="flex items-center justify-center gap-1.5 px-3.5 py-2 text-xs rounded-lg bg-amber-600 hover:bg-amber-500 text-white font-semibold shadow-md transition-colors cursor-pointer"
+            >
+              <PackagePlus className="w-4.5 h-4.5" />
+              <span>Trading Material Form</span>
+            </button>
           </div>
         ) : activeTab === 'op_stock' ? (
           <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
@@ -1152,8 +1021,15 @@ const StockAdjustment = () => {
               <PackagePlus className="w-4.5 h-4.5" />
               <span>Add Finished Good OP. Stock</span>
             </button>
+            <button
+              onClick={() => openNewOpStockForm('trading_material')}
+              className="flex items-center justify-center gap-1.5 px-3.5 py-2 text-xs rounded-lg bg-amber-600 hover:bg-amber-500 text-white font-semibold shadow-md transition-colors cursor-pointer"
+            >
+              <Plus className="w-4.5 h-4.5" />
+              <span>Add Trading Material OP. Stock</span>
+            </button>
           </div>
-        ) : activeTab === 'add_product' ? (
+        ) : activeTab === 'add_product' && (
           <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
             <button
               onClick={() => {
@@ -1175,16 +1051,6 @@ const StockAdjustment = () => {
             >
               <Plus className="w-4.5 h-4.5" />
               <span>Add New Product</span>
-            </button>
-          </div>
-        ) : (
-          <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
-            <button
-              onClick={openProductRateForm}
-              className="flex items-center justify-center gap-1.5 px-3.5 py-2 text-xs rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-semibold shadow-md transition-colors cursor-pointer"
-            >
-              <Plus className="w-4.5 h-4.5" />
-              <span>Add Product Rate</span>
             </button>
           </div>
         )}
@@ -1217,19 +1083,6 @@ const StockAdjustment = () => {
             OP. Stock
           </button>
         )}
-        {visibleTabs.includes('products') && (
-          <button
-            type="button"
-            onClick={() => setActiveTab('products')}
-            className={`px-4 py-2.5 text-xs font-semibold border-b-2 transition-colors cursor-pointer ${
-              activeTab === 'products'
-                ? 'border-emerald-500 text-emerald-300'
-                : 'border-transparent text-slate-500 hover:text-slate-300'
-            }`}
-          >
-            Product Rate
-          </button>
-        )}
         {visibleTabs.includes('add_product') && (
           <button
             type="button"
@@ -1251,9 +1104,7 @@ const StockAdjustment = () => {
             ? 'Stock Adjustment Entries'
             : activeTab === 'op_stock'
               ? 'Manual OP. Stock Entries'
-              : activeTab === 'add_product'
-                ? 'Master Products List'
-                : 'Product Rates'}
+              : 'Master Products List'}
         </h3>
         {activeTab === 'add_product' ? (
           <Table
@@ -1297,7 +1148,7 @@ const StockAdjustment = () => {
             data={allProductsRows}
             searchPlaceholder="Search products..."
             filterKey="material_type"
-            filterOptions={['raw_material', 'finish_good']}
+            filterOptions={['raw_material', 'finish_good', 'trading_material']}
             filterPlaceholder="Filter Type"
             exportFileName="master_products"
           />
@@ -1308,20 +1159,9 @@ const StockAdjustment = () => {
             data={savedOpStockRows}
             searchPlaceholder="Search OP. Stock entries..."
             filterKey="material_type"
-            filterOptions={['raw_material', 'finish_good']}
+            filterOptions={['raw_material', 'finish_good', 'trading_material']}
             filterPlaceholder="Filter Type"
             exportFileName="manual_op_stock_entries"
-          />
-        ) : activeTab === 'products' ? (
-          <Table
-            isLoading={productRateLoading}
-            columns={productRateColumns}
-            data={productRateRows}
-            searchPlaceholder="Search product rates..."
-            filterKey="material_type"
-            filterOptions={['raw_material', 'finish_good']}
-            filterPlaceholder="Filter Type"
-            exportFileName="product_rates"
           />
         ) : (
           <Table
@@ -1382,17 +1222,6 @@ const StockAdjustment = () => {
       </Modal>
 
       <Modal
-        isOpen={productRateFormOpen}
-        onClose={() => {
-          setProductRateFormOpen(false);
-          setEditingProductRate(null);
-        }}
-        title={editingProductRate ? 'Edit Product Rate' : 'Add Product Rate'}
-      >
-        {renderProductRateForm()}
-      </Modal>
-
-      <Modal
         isOpen={finishEntryFormOpen}
         onClose={() => {
           setFinishEntryFormOpen(false);
@@ -1420,9 +1249,36 @@ const StockAdjustment = () => {
       </Modal>
 
       <Modal
+        isOpen={tradingEntryFormOpen}
+        onClose={() => {
+          setTradingEntryFormOpen(false);
+          setEditingAdjustment(null);
+          resetTrading(defaultFormValues);
+        }}
+        title={editingAdjustment ? "Edit Trading Material Factory Entry" : "Trading Material Factory Entry"}
+      >
+        {renderAdjustmentForm({
+          errors: errorsTrading,
+          filteredOptions: filteredTradingItemOptions,
+          handleSubmit: handleTradingSubmit,
+          onSubmit: onTradingEntrySubmit,
+          register: registerTrading,
+          setOpen: (open) => {
+            if (!open) {
+              setTradingEntryFormOpen(false);
+              setEditingAdjustment(null);
+              resetTrading(defaultFormValues);
+            }
+          },
+          submitLabel: editingAdjustment ? 'Update Entry' : 'Add Entry',
+          itemLabel: 'Product Name'
+        })}
+      </Modal>
+
+      <Modal
         isOpen={opStockFormOpen}
         onClose={closeOpStockForm}
-        title={`${editingOpStockRow ? 'Edit' : 'Add'} ${opStockMaterialType === 'raw_material' ? 'Raw Material' : 'Finished Good'} OP. Stock`}
+        title={`${editingOpStockRow ? 'Edit' : 'Add'} ${opStockMaterialType === 'raw_material' ? 'Raw Material' : opStockMaterialType === 'finish_good' ? 'Finished Good' : 'Trading Material'} OP. Stock`}
       >
         {renderAdjustmentForm({
           errors: errorsOpStock,
@@ -1460,6 +1316,7 @@ const StockAdjustment = () => {
               >
                 <option value="raw_material">Raw Material</option>
                 <option value="finish_good">Finished Good</option>
+                <option value="trading_material">Trading Material</option>
               </select>
             </div>
             
@@ -1523,7 +1380,10 @@ const StockAdjustment = () => {
                     className="w-full px-3 py-2.5 text-xs rounded-lg glass-input"
                   />
                 </div>
+              </>
+            )}
 
+            {selectedNewProductType === 'raw_material' && (
                 <div className="space-y-1">
                   <label className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider pl-0.5">Unit <span className="text-red-500">*</span></label>
                   <select
@@ -1535,9 +1395,14 @@ const StockAdjustment = () => {
                     <option value="KGS">KGS</option>
                     <option value="LITER">LITER</option>
                     <option value="PCS">PCS</option>
+                    <option value="NOS">NOS</option>
+                    <option value="SET">SET</option>
                   </select>
                 </div>
-
+            )}
+            
+            {selectedNewProductType === 'raw_material' && (
+              <>
                 <div className="space-y-1">
                   <label className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider pl-0.5">Safety Factor</label>
                   <input

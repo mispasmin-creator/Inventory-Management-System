@@ -7,6 +7,7 @@ import {
   Settings,
   Package,
   History,
+  Repeat,
 } from "lucide-react";
 import { useAuth } from "../hooks/useAuth";
 
@@ -72,6 +73,7 @@ const TopNav = () => {
     { title: "Dashboard",       path: "/",               icon: LayoutDashboard },
     { title: "Raw Material",    path: "/raw-material",   icon: Building2 },
     { title: "Finished Good",   path: "/finished-good",  icon: Package },
+    { title: "Trading Material",path: "/trading-material",icon: Repeat },
     { title: "Stock Adjustment",path: "/stock-adjustment",icon: SlidersHorizontal },
     { title: "History",         path: "/history",        icon: History },
     { title: "System Settings", path: "/settings",       icon: Settings },
@@ -84,6 +86,7 @@ const TopNav = () => {
       Dashboard:        "Dashboard",
       "Raw Material":   null,
       "Finished Good":  null,
+      "Trading Material": "TradingMaterial",
       "Stock Adjustment": "StockAdjustment",
       History:            "History",
       "System Settings":  "Settings",

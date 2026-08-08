@@ -1328,7 +1328,8 @@ export const apiService = {
           crushingOutputsMap
         },
         productTabRateMap,
-        salesRawOrdersResult
+        salesRawOrdersResult,
+        purchaseReturnMap
       ] = await Promise.all([
         query,
         buildLiftDataMaps(selectedDate),
@@ -1344,7 +1345,8 @@ export const apiService = {
           .catch(err => {
             console.warn('Failed to fetch Sales of Raw Material orders:', err.message);
             return [];
-          })
+          }),
+        buildFinishedGoodPurchaseReturnMap(selectedDate)
       ]);
 
       if (error) throw error;
@@ -1452,10 +1454,15 @@ export const apiService = {
           }
           const opStock = numberOrZero(item.op_stock);
 
+          // Purchase Return is summed across ALL records matching this firm + item
+          // (not restricted to the selected date range) so the figure always reflects
+          // the full return total for that firm/product combination.
+          const purchaseReturnQuantity = purchaseReturnMap[key]?.total || 0;
+
           let actualLevel = actualQuantityMap[key] ?? item.actual_level ?? '';
           const salesRawQty = salesRawQtyMap[key] || 0;
-          if (actualLevel !== '' || salesRawQty !== 0 || opStock !== 0) {
-            actualLevel = opStock + Number(actualLevel || 0) - salesRawQty;
+          if (actualLevel !== '' || salesRawQty !== 0 || opStock !== 0 || purchaseReturnQuantity !== 0) {
+            actualLevel = opStock + Number(actualLevel || 0) - salesRawQty - purchaseReturnQuantity;
           }
 
           const optimumStock = item.optimum_stock ?? item.optimum_qty ?? '';
@@ -1477,6 +1484,7 @@ export const apiService = {
             optimum_stock: optimumStock,
             op_stock: opStock,
             purchase_system: purchaseQuantityMap[key] || 0,
+            purchase_return: purchaseReturnQuantity,
             production_consumption: -(productionUsageMap[key] || 0) - (semiRawConsumptionMap[key] || 0) + (semiGrainsMap[key] || 0) + (semiFinesMap[key] || 0) + (semiGreenMap[key] || 0) + (semiClinkerMap[key] || 0) + (crushingGrainsMap[key] || 0) + (crushingLumpsMap[key] || 0) + (crushingOutputsMap[key] || 0),
             semi_grains: semiGrainsMap[key] || 0,
             semi_fines: semiFinesMap[key] || 0,

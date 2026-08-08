@@ -17,6 +17,7 @@ import Reports from './pages/Reports';
 import Settings from './pages/Settings';
 import StockAdjustment from './pages/StockAdjustment';
 import History from './pages/History';
+import TradingMaterial from './pages/TradingMaterial';
 
 // Route Guard for Protected Pages
 const ProtectedRoute = ({ children }) => {
@@ -54,6 +55,7 @@ const AppLayout = () => {
             <Route path="/finished-good" element={<BranchInventory />} />
             <Route path="/branch/:branchName" element={<BranchInventory />} />
             <Route path="/finish-good/:branchName" element={<BranchInventory />} />
+            <Route path="/trading-material" element={<TradingMaterial />} />
             <Route path="/purchase" element={<Purchase />} />
             <Route path="/dispatch" element={<Dispatch />} />
             <Route path="/crushing" element={<Crushing />} />
