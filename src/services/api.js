@@ -1024,8 +1024,13 @@ const buildLiftDataMaps = async (selectedDate = '') => {
       const rawActualQuantity = row['Actual Quantity'];
       const actualQuantity = Number(rawActualQuantity);
       if (isInSelectedPeriod && Number.isFinite(actualQuantity)) {
-        actualQuantityMap[key] = (actualQuantityMap[key] || 0) + actualQuantity;
-        purchaseQuantityMap[key] = (purchaseQuantityMap[key] || 0) + actualQuantity;
+        // Light Diesel Oil is purchased in MT; convert to Ltr (x1000) so it matches the
+        // unit used everywhere else (production usage, op stock, etc.) — RATE_DIVIDE_BY_1000_ITEM_KEYS.
+        const convertedActualQuantity = RATE_DIVIDE_BY_1000_ITEM_KEYS.has(itemKey)
+          ? actualQuantity * 1000
+          : actualQuantity;
+        actualQuantityMap[key] = (actualQuantityMap[key] || 0) + convertedActualQuantity;
+        purchaseQuantityMap[key] = (purchaseQuantityMap[key] || 0) + convertedActualQuantity;
       }
 
       // Product Rate: take the Rate from the LIFT-ACCOUNTS record with the latest Date Of Receiving.
@@ -1376,12 +1381,6 @@ export const apiService = {
             const components = data?.components || (Array.isArray(data) ? data : []);
             const processingCost = data?.processingCost || 0;
             if (components.length === 0 && processingCost === 0) return;
-            // "<Base> Fines" items are already priced on the frontend (grain sibling's rate +
-            // its own processing cost — see BranchInventory.jsx). Skip them here so this
-            // component-only rate (which excludes processing cost) doesn't get handed to the
-            // frontend as if it were a complete rate, causing the processing cost to be
-            // silently dropped for them.
-            if (key.split('::')[1]?.endsWith('fines')) return;
             const firmKey = key.split('::')[0];
 
             let totalCost = 0;
@@ -1437,14 +1436,32 @@ export const apiService = {
         .map((item, index) => {
           const key = `${normalizeFirmKey(item.firm_name)}::${normalizeItemKey(item.item_name)}`;
           const derivedSemiRate = derivedSemiRatesMap[key];
+          const isFinesItem = normalizeItemKey(item.item_name).endsWith('fines');
 
-          const baseRate = poRatesMap[key] !== undefined
-            ? poRatesMap[key]
-            : (productTabRateMap[key] !== undefined
-              ? productTabRateMap[key]
-              : (derivedSemiRate !== undefined
-                ? derivedSemiRate
-                : (item.product_rate ?? '')));
+          // "<Base> Fines" items are normally produced (from grains, or lumps directly), not
+          // purchased — so prefer the production-derived rate (computed above from the item's
+          // actual latest production run) over any purchase rate. Only fall back to a purchase
+          // rate when production data couldn't derive one. Every other item type is unaffected
+          // and keeps purchase-first priority as before.
+          const useProductionRateFirst = isFinesItem && derivedSemiRate !== undefined;
+
+          // True only when the rate genuinely comes from a purchase/manual source (LIFT-ACCOUNTS
+          // PO or the Product Rate tab), not from the production-component derivation below.
+          // Used by the frontend (isFinesOwnPurchaseRate) to decide whether a "<Base> Fines"
+          // item's own processing cost still needs to be added on top of this rate.
+          const isPurchaseSourcedRate = useProductionRateFirst
+            ? false
+            : (poRatesMap[key] !== undefined || productTabRateMap[key] !== undefined);
+
+          const baseRate = useProductionRateFirst
+            ? derivedSemiRate
+            : (poRatesMap[key] !== undefined
+              ? poRatesMap[key]
+              : (productTabRateMap[key] !== undefined
+                ? productTabRateMap[key]
+                : (derivedSemiRate !== undefined
+                  ? derivedSemiRate
+                  : (item.product_rate ?? ''))));
           const transRate = transportingRatesMap[key] || 0;
           let rate = baseRate;
           if (rate !== '') {
@@ -1458,11 +1475,16 @@ export const apiService = {
           // (not restricted to the selected date range) so the figure always reflects
           // the full return total for that firm/product combination.
           const purchaseReturnQuantity = purchaseReturnMap[key]?.total || 0;
+          // Purchase Return converted to Ltr (x1000) for MT-purchased items (RATE_DIVIDE_BY_1000_ITEM_KEYS)
+          // so it nets against purchase_system, and against actualQuantityMap below, in the same unit.
+          const purchaseReturnDisplayQuantity = RATE_DIVIDE_BY_1000_ITEM_KEYS.has(normalizeItemKey(item.item_name))
+            ? purchaseReturnQuantity * 1000
+            : purchaseReturnQuantity;
 
           let actualLevel = actualQuantityMap[key] ?? item.actual_level ?? '';
           const salesRawQty = salesRawQtyMap[key] || 0;
-          if (actualLevel !== '' || salesRawQty !== 0 || opStock !== 0 || purchaseReturnQuantity !== 0) {
-            actualLevel = opStock + Number(actualLevel || 0) - salesRawQty - purchaseReturnQuantity;
+          if (actualLevel !== '' || salesRawQty !== 0 || opStock !== 0 || purchaseReturnDisplayQuantity !== 0) {
+            actualLevel = opStock + Number(actualLevel || 0) - salesRawQty - purchaseReturnDisplayQuantity;
           }
 
           const optimumStock = item.optimum_stock ?? item.optimum_qty ?? '';
@@ -1484,7 +1506,7 @@ export const apiService = {
             optimum_stock: optimumStock,
             op_stock: opStock,
             purchase_system: purchaseQuantityMap[key] || 0,
-            purchase_return: purchaseReturnQuantity,
+            purchase_return: purchaseReturnDisplayQuantity,
             production_consumption: -(productionUsageMap[key] || 0) - (semiRawConsumptionMap[key] || 0) + (semiGrainsMap[key] || 0) + (semiFinesMap[key] || 0) + (semiGreenMap[key] || 0) + (semiClinkerMap[key] || 0) + (crushingGrainsMap[key] || 0) + (crushingLumpsMap[key] || 0) + (crushingOutputsMap[key] || 0),
             semi_grains: semiGrainsMap[key] || 0,
             semi_fines: semiFinesMap[key] || 0,
@@ -1498,6 +1520,7 @@ export const apiService = {
             actual_level: actualLevel,
             product_rate: rate,
             material_rate: baseRate,
+            is_purchase_rate: isPurchaseSourcedRate,
             transportation_rate: transportingRatesMap[key] !== undefined ? transportingRatesMap[key] : 0,
             optimum_stock_total: calculatedOptimumTotal,
             stock_total: calculatedStockTotal,

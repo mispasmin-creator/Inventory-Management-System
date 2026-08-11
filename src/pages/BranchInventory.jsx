@@ -530,10 +530,11 @@ const BranchInventory = () => {
   ];
 
   const renderRawNumber = (value) => value !== null && value !== undefined && value !== '' ? Math.abs(Number(value)).toLocaleString() : '';
-  // A "Fines" item priced directly from its own purchase data (grains fallback not used)
+  // A "Fines" item priced directly from its own purchase data (grains fallback not used,
+  // and the rate is confirmed purchase-sourced, not derived from production components)
   // already reflects the final rate: its processing cost shouldn't be added or shown.
   const isFinesOwnPurchaseRate = (item) =>
-    /\sfines$/.test((item?.item_name || '').trim().toLowerCase()) && item?.fines_grains_rate == null;
+    /\sfines$/.test((item?.item_name || '').trim().toLowerCase()) && item?.fines_grains_rate == null && item?.is_purchase_rate === true;
   const renderRawCurrency = (value) => {
     const num = (value !== null && value !== undefined && value !== '' && value !== '-') ? Number(value) : 0;
     const cleanNum = Number.isFinite(num) ? Math.abs(num) : 0;
@@ -813,7 +814,7 @@ const BranchInventory = () => {
       const finesMatch = itemKey && itemKey.match(/^(.*)\s+fines$/);
       if (finesMatch && semiCost > 0 && purchaseRate <= 0) {
         const base = finesMatch[1].trim();
-        const grainSuffixes = ['(0-1)', '(1-3)', '(3-5)'];
+        const grainSuffixes = ['(0-1)', '(1-3)', '(3-5)', '(3-8)', '(5-8)'];
         // Look up siblings in `totalsItems` (the unpaginated fetch), not the paginated
         // `inventoryItems` table data, since a grain sibling can easily land on a
         // different page than the "Fines" row and would otherwise never be found.
@@ -855,8 +856,8 @@ const BranchInventory = () => {
       const effectivePurchaseRate = purchaseRate > 0 ? purchaseRate : (finesGrainsRate !== null ? finesGrainsRate : purchaseRate);
       // Fines rate sourced directly from its own purchase data already reflects the final
       // rate: don't add the processing cost on top. The processing cost only applies when
-      // the rate was derived from the grain siblings' fallback.
-      const isFinesOwnPurchaseRate = finesMatch && purchaseRate > 0;
+      // the rate was derived from production components (grains, or lumps directly).
+      const isFinesOwnPurchaseRate = finesMatch && purchaseRate > 0 && item.is_purchase_rate === true;
       const baseProductRate = crushingRate != null && crushingRate > 0
         ? crushingRate
         : (effectivePurchaseRate + (isFinesOwnPurchaseRate ? 0 : semiCost));
@@ -879,6 +880,19 @@ const BranchInventory = () => {
           if (slagItem) {
             extraRate = Number(slagItem.product_rate) || 0;
             extraLabel = 'Slag';
+          }
+        } else if (['mc - 90 (0-1)', 'mc - 90 (1-3)', 'mc - 90 (3-5)', 'mc - 90 (3-8)', 'mc - 90 (5-8)'].includes(itemKey)) {
+          // These grains are crushed from "MC - 90 Lumps" (crushing_actual), so baseProductRate
+          // above is only the crushing Processing Cost — add the Lumps rate on top, same as the
+          // Insulator/Ferro Chrome families. Look up in `totalsItems` (unpaginated), not the
+          // paginated `inventoryItems`, since Lumps can land on a different page than the grains.
+          const siblingSource = totalsItems.length > 0 ? totalsItems : inventoryItems;
+          const lumpsItem = siblingSource.find(
+            (i) => i.firm_name?.trim().toLowerCase() === firmKey && i.item_name?.trim().toLowerCase() === 'mc - 90 lumps'
+          );
+          if (lumpsItem) {
+            extraRate = Number(lumpsItem.product_rate) || 0;
+            extraLabel = 'Lumps';
           }
         }
       }
