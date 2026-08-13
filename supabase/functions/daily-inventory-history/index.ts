@@ -220,6 +220,7 @@ const buildSemiFinishedActualLevelMap = async (selectedDate: string) => {
   const semiAdjustmentMap: Record<string, number> = {};
   const semiRawConsumptionMap: Record<string, number> = {};
   const latestSemiComponentsMap: Record<string, { components: { rmKey: string; qty: number }[]; processingCost: number }> = {};
+  const semiProcessingCostMap: Record<string, number> = {};
   const productionFirmMap = new Map<string, unknown>();
 
   const semiProduction = await fetchAll(
@@ -276,6 +277,10 @@ const buildSemiFinishedActualLevelMap = async (selectedDate: string) => {
     const key = `${firmKey}::${productKey}`;
     semiAdjustmentMap[key] = (semiAdjustmentMap[key] || 0) + signedQuantity;
 
+    if (row['Processing Cost'] && semiProcessingCostMap[key] === undefined) {
+      semiProcessingCostMap[key] = Number(row['Processing Cost']);
+    }
+
     // Component rates, used to derive Product Rate for semi-finished goods (e.g. P-14
     // Green/Clinker) — only the first (i.e. latest, rows are id-desc) row per key is kept.
     if (!latestSemiComponentsMap[key]) {
@@ -298,12 +303,13 @@ const buildSemiFinishedActualLevelMap = async (selectedDate: string) => {
     }
   });
 
-  return { semiAdjustmentMap, semiRawConsumptionMap, latestSemiComponentsMap };
+  return { semiAdjustmentMap, semiRawConsumptionMap, latestSemiComponentsMap, semiProcessingCostMap };
 };
 
 const buildCrushingActualLevelMap = async (selectedDate: string) => {
   const crushingAdjustmentMap: Record<string, number> = {};
   const crushingOutputsMap: Record<string, number> = {};
+  const crushingCostMap: Record<string, number> = {};
 
   const rows = await fetchAll(db().productionDb, 'crushing_actual', '*', (q) => q.order('id', { ascending: false }));
   rows.forEach((row) => {
@@ -332,13 +338,20 @@ const buildCrushingActualLevelMap = async (selectedDate: string) => {
       const fgKey = normalizeItemKey(row[`Finished Goods Name ${i}`]);
       const fgQtyRaw = row[`Qty ${i}`];
       const fgQty = Number(fgQtyRaw);
+      const costRaw = row[`Processing Cost ${i}`];
+      if (fgKey && costRaw != null && Number(costRaw) > 0) {
+        const key = `${firmKey}::${fgKey}`;
+        if (crushingCostMap[key] === undefined) {
+          crushingCostMap[key] = Number(costRaw);
+        }
+      }
       if (!fgKey || fgQtyRaw === null || fgQtyRaw === '' || !Number.isFinite(fgQty)) continue;
       const fgMapKey = `${firmKey}::${fgKey}`;
       crushingOutputsMap[fgMapKey] = (crushingOutputsMap[fgMapKey] || 0) + fgQty;
     }
   });
 
-  return { crushingAdjustmentMap, crushingOutputsMap };
+  return { crushingAdjustmentMap, crushingOutputsMap, crushingCostMap };
 };
 
 // Rates entered manually in Stock Adjustment's "Product Rate" tab (stock_adjustment.rate).
@@ -482,10 +495,6 @@ const buildLiftDataMaps = async (selectedDate: string) => {
       let changed = false;
       Object.entries(componentsMap).forEach(([key, data]) => {
         if (data.components.length === 0 && data.processingCost === 0) return;
-        // "<Base> Fines" items are already priced on the frontend (grain sibling's rate +
-        // its own processing cost) — skip so this component-only rate (which excludes
-        // processing cost) doesn't get handed out as if it were a complete rate for them.
-        if (key.split('::')[1]?.endsWith('fines')) return;
         const firmKey = key.split('::')[0];
 
         let totalCost = 0;
@@ -531,7 +540,15 @@ const buildLiftDataMaps = async (selectedDate: string) => {
     }
   }
 
-  return { actualQuantityMap, poRatesMap, transportingRatesMap, productTabRateMap, derivedSemiRatesMap };
+  return {
+    actualQuantityMap,
+    poRatesMap,
+    transportingRatesMap,
+    productTabRateMap,
+    derivedSemiRatesMap,
+    semiProcessingCostMap: semi.semiProcessingCostMap,
+    crushingCostMap: crushing.crushingCostMap,
+  };
 };
 
 // --- finished goods source maps -------------------------------------------
@@ -780,8 +797,12 @@ const snapshotRawMaterial = async (snapshotDate: string, selectedDate: string) =
     adjustmentAfter[key] = (adjustmentAfter[key] || 0) + (entry.status === 'Factory -' ? -qty : qty);
   });
 
-  return masters.map((item) => {
-    const key = `${normalizeFirmKey(item.firm_name)}::${normalizeItemKey(item.item_name)}`;
+  // Pass 1: Compute initial levels & purchase rates (api.js parity)
+  const initialItems = masters.map((item) => {
+    const firmKey = normalizeFirmKey(item.firm_name);
+    const itemKey = normalizeItemKey(item.item_name);
+    const key = `${firmKey}::${itemKey}`;
+
     const opStock = numberOrZero(item.op_stock);
     const rawActual = lift.actualQuantityMap[key] as number | undefined;
     let actualLevel: number | '' = rawActual ?? '';
@@ -795,33 +816,115 @@ const snapshotRawMaterial = async (snapshotDate: string, selectedDate: string) =
     const adjAfter = (adjustmentAfter[`${plainFirm}::${plainItem}`] || 0) + (adjustmentAfter[`*::${plainItem}`] || 0);
     const adjustedLevel: number | null = actualLevel !== '' ? Number(actualLevel) + adjAfter : null;
 
-    // Product Rate: LIFT-ACCOUNTS latest rate, else the Stock Adjustment Products-tab
-    // rate, else the derived semi-finished rate, else inventory_master.product_rate —
-    // then add the per-MT transportation rate. Mirrors the Raw Material screen exactly.
-    const baseRate = lift.poRatesMap[key] !== undefined
-      ? lift.poRatesMap[key]
-      : (lift.productTabRateMap[key] !== undefined
-        ? lift.productTabRateMap[key]
-        : (lift.derivedSemiRatesMap[key] !== undefined
-          ? lift.derivedSemiRatesMap[key]
-          : (item.product_rate ?? '')));
+    const isFinesItem = itemKey.endsWith('fines');
+    const derivedSemiRate = lift.derivedSemiRatesMap[key];
+    const useProductionRateFirst = isFinesItem && derivedSemiRate !== undefined;
+    const isPurchaseSourcedRate = useProductionRateFirst
+      ? false
+      : (lift.poRatesMap[key] !== undefined || lift.productTabRateMap[key] !== undefined);
+
+    const baseRate = useProductionRateFirst
+      ? derivedSemiRate
+      : (lift.poRatesMap[key] !== undefined
+        ? lift.poRatesMap[key]
+        : (lift.productTabRateMap[key] !== undefined
+          ? lift.productTabRateMap[key]
+          : (derivedSemiRate !== undefined
+            ? derivedSemiRate
+            : (item.product_rate ?? ''))));
+
     const transRate = lift.transportingRatesMap[key] || 0;
-    let productRate: number | null = null;
+    let purchaseRate = 0;
     if (baseRate !== '') {
-      productRate = Number(baseRate) + transRate;
+      purchaseRate = Number(baseRate) + transRate;
     } else if (transRate > 0) {
-      productRate = transRate;
+      purchaseRate = transRate;
     }
 
-    // Only the columns the History page reads are stored. optimum_qty/max_qty
-    // ride along because the page tints each cell against them.
+    return {
+      item,
+      firmKey,
+      itemKey,
+      key,
+      adjustedLevel,
+      purchaseRate,
+      isPurchaseSourcedRate,
+    };
+  });
+
+  // Pass 2: Apply BranchInventory.jsx display rate enhancements (semiCost, crushingCost, fines fallback, extra rates)
+  return initialItems.map(({ item, firmKey, itemKey, key, adjustedLevel, purchaseRate, isPurchaseSourcedRate }) => {
+    const crushingRate = lift.crushingCostMap[key] != null ? lift.crushingCostMap[key] : null;
+    const semiProcessingCost = lift.semiProcessingCostMap[key] != null ? lift.semiProcessingCostMap[key] : null;
+    const semiCost = semiProcessingCost != null ? Number(semiProcessingCost) : 0;
+
+    let finesGrainsRate: number | null = null;
+    const finesMatch = itemKey && itemKey.match(/^(.*)fines$/);
+    if (finesMatch && semiCost > 0 && purchaseRate <= 0) {
+      const base = itemKey.replace(/fines$/, '').trim();
+      const grainSuffixes = ['(0-1)', '(1-3)', '(3-5)', '(3-8)', '(5-8)'];
+      for (const suffix of grainSuffixes) {
+        const grainItem = initialItems.find(
+          (i) => i.firmKey === firmKey && (i.itemKey === `${base}${normalizeItemKey(suffix)}` || i.itemKey === `${base} ${normalizeItemKey(suffix)}`)
+        );
+        if (grainItem && grainItem.purchaseRate > 0) {
+          finesGrainsRate = grainItem.purchaseRate;
+          break;
+        }
+      }
+
+      if (finesGrainsRate === null) {
+        const processedSuffixes = ['clinker', 'fired'];
+        for (const suffix of processedSuffixes) {
+          const processedItem = initialItems.find(
+            (i) => i.firmKey === firmKey && i.itemKey === `${base}${suffix}`
+          );
+          if (processedItem) {
+            const processedItemCost = Number(lift.semiProcessingCostMap[processedItem.key] || 0);
+            const processedFullRate = processedItem.purchaseRate + processedItemCost;
+            if (processedFullRate > 0) {
+              finesGrainsRate = processedFullRate;
+              break;
+            }
+          }
+        }
+      }
+    }
+
+    const effectivePurchaseRate = purchaseRate > 0 ? purchaseRate : (finesGrainsRate !== null ? finesGrainsRate : purchaseRate);
+    const isFinesOwnPurchaseRate = finesMatch && purchaseRate > 0 && isPurchaseSourcedRate === true;
+    const baseProductRate = crushingRate != null && crushingRate > 0
+      ? crushingRate
+      : (effectivePurchaseRate + (isFinesOwnPurchaseRate ? 0 : semiCost));
+
+    let extraRate = 0;
+    if (baseProductRate > 0) {
+      if (['insulator (0-1)', 'insulator (1-3)', 'insulator (3-5)', 'insulator grains'].includes(item.item_name?.toLowerCase())) {
+        const lumpsItem = initialItems.find((i) => i.firmKey === firmKey && i.itemKey === 'insulatorlumps');
+        if (lumpsItem) extraRate = lumpsItem.purchaseRate || 0;
+      } else if (['ferro chrome (0-1)', 'ferro chrome (1-3)', 'ferro chrome (3-5)'].includes(item.item_name?.toLowerCase())) {
+        const slagItem = initialItems.find((i) => i.firmKey === firmKey && i.itemKey === 'ferrochromeslag');
+        if (slagItem) extraRate = slagItem.purchaseRate || 0;
+      } else if (['mc - 90 (0-1)', 'mc - 90 (1-3)', 'mc - 90 (3-5)', 'mc - 90 (3-8)', 'mc - 90 (5-8)'].includes(item.item_name?.toLowerCase())) {
+        const lumpsItem = initialItems.find((i) => i.firmKey === firmKey && i.itemKey === 'mc90lumps');
+        if (lumpsItem) extraRate = lumpsItem.purchaseRate || 0;
+      }
+    }
+
+    let finalProductRate: number | null = null;
+    if (baseProductRate > 0) {
+      finalProductRate = roundTo(baseProductRate + extraRate, 2);
+    } else if (extraRate > 0) {
+      finalProductRate = roundTo(extraRate, 2);
+    }
+
     return {
       snapshot_date: snapshotDate,
       firm_name: item.firm_name,
       item_name: item.item_name,
       unit: item.unit ?? '',
       actual_level: adjustedLevel,
-      product_rate: productRate,
+      product_rate: finalProductRate,
       optimum_qty: item.optimum_qty ?? null,
       max_qty: item.max_qty ?? null,
     };
