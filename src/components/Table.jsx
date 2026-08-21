@@ -9,6 +9,8 @@ const Table = ({
   filterOptions = [], 
   filterPlaceholder = "All Categories",
   exportFileName = "report",
+  exportData = null,
+  fetchExportData = null,
   actions = null,
   legend = null,
   legendKey = null,
@@ -158,15 +160,68 @@ const Table = ({
     return processedData.slice(start, start + pageSize);
   }, [processedData, currentPage, pageSize, serverSide]);
 
-  // Export to CSV helper
-  const exportToCSV = () => {
-    if (processedData.length === 0) return;
+  // Applies the same search/legend/sort the on-screen table uses, to whatever row set is
+  // being exported (either the pre-supplied `exportData` or a freshly fetched full list).
+  const applyExportFilters = (rows) => {
+    let result = [...rows];
+
+    if (serverSide && searchQuery) {
+      const query = searchQuery.toLowerCase();
+      result = result.filter(row => {
+        return Object.values(row).some(cell => {
+          if (cell === null || cell === undefined) return false;
+          return String(cell).toLowerCase().includes(query);
+        });
+      });
+    }
+
+    if (legendKey && activeLegendValue) {
+      result = result.filter(row => {
+        const val = row[legendKey];
+        return val && String(val).trim().toLowerCase() === String(activeLegendValue).trim().toLowerCase();
+      });
+    }
+
+    if (sortConfig.key) {
+      result.sort((a, b) => {
+        let valA = a[sortConfig.key];
+        let valB = b[sortConfig.key];
+
+        if (!isNaN(Number(valA)) && !isNaN(Number(valB))) {
+          valA = Number(valA);
+          valB = Number(valB);
+        } else {
+          valA = valA ? String(valA).toLowerCase() : '';
+          valB = valB ? String(valB).toLowerCase() : '';
+        }
+
+        if (valA < valB) return sortConfig.direction === 'asc' ? -1 : 1;
+        if (valA > valB) return sortConfig.direction === 'asc' ? 1 : -1;
+        return 0;
+      });
+    }
+
+    return result;
+  };
+
+  // Full dataset to export when a pre-supplied `exportData` list is used (sync path).
+  // Falls back to `processedData` (prior behavior, unchanged) when `exportData` isn't given.
+  const exportSourceData = useMemo(() => {
+    if (!exportData || exportData.length === 0) return processedData;
+    return applyExportFilters(exportData);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [exportData, processedData, serverSide, searchQuery, legendKey, activeLegendValue, sortConfig]);
+
+  const [exportLoading, setExportLoading] = useState(false);
+
+  const downloadCSV = (rows) => {
+    if (rows.length === 0) return;
 
     // Headers
     const headers = activeColumns.map(c => c.header).join(',');
-    
+
     // Rows
-    const rows = processedData.map(row => {
+    const csvRows = rows.map(row => {
       return activeColumns.map(col => {
         let cellVal = '';
         if (typeof col.accessor === 'function') {
@@ -176,20 +231,45 @@ const Table = ({
         }
         // Clean cell for CSV format (escape quotes and commas)
         const cellString = String(cellVal).replace(/"/g, '""');
-        return cellString.includes(',') || cellString.includes('\n') 
-          ? `"${cellString}"` 
+        return cellString.includes(',') || cellString.includes('\n')
+          ? `"${cellString}"`
           : cellString;
       }).join(',');
     });
 
-    const csvContent = "data:text/csv;charset=utf-8," + [headers, ...rows].join('\n');
-    const encodedUri = encodeURI(csvContent);
+    const csvContent = "\uFEFF" + [headers, ...csvRows].join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
-    link.setAttribute("href", encodedUri);
+    link.setAttribute("href", url);
     link.setAttribute("download", `${exportFileName}_${new Date().toISOString().split('T')[0]}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  // Export to CSV helper. When `fetchExportData` is supplied, it's called fresh on every
+  // click (rather than relying on some pre-loaded background state that could still be
+  // loading or stale) so the export always reflects the complete, current dataset — not
+  // just whatever page/rows-per-page is currently selected on screen.
+  const exportToCSV = async () => {
+    if (exportLoading) return;
+
+    if (typeof fetchExportData === 'function') {
+      setExportLoading(true);
+      try {
+        const freshRows = await fetchExportData();
+        downloadCSV(applyExportFilters(freshRows || []));
+      } catch (e) {
+        console.error('Export failed:', e);
+      } finally {
+        setExportLoading(false);
+      }
+      return;
+    }
+
+    downloadCSV(exportSourceData);
   };
 
   return (
@@ -275,11 +355,12 @@ const Table = ({
           {/* Export to CSV Button */}
           <button
             onClick={exportToCSV}
-            disabled={data.length === 0}
+            disabled={exportLoading || (typeof fetchExportData !== 'function' && exportSourceData.length === 0)}
+            title={exportLoading ? 'Preparing full export data, please wait…' : undefined}
             className="btn-green-solid disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <Download className="w-3.5 h-3.5" />
-            <span>Export CSV</span>
+            <span>{exportLoading ? 'Preparing…' : 'Export CSV'}</span>
           </button>
         </div>
       </div>

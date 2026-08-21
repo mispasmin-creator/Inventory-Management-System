@@ -49,7 +49,237 @@ const calculateStockTotal = (actualLevel, productRate) => {
   return actual * rate;
 };
 
+const getColourForStatus = (status) => {
+  if (!status) return '';
+  const s = String(status).trim().toLowerCase();
+  if (s === 'no stock' || s === 'low stock' || s === 'red') return 'Red';
+  if (s === 'medium stock' || s === 'orange') return 'Orange';
+  if (s === 'normal stock' || s === 'green') return 'Green';
+  if (s === 'excess stock' || s === 'purple') return 'Purple';
+  return '';
+};
+
 const INVENTORY_START_DATE = '2026-06-23';
+
+// Adjustment totals from stock_adjustment factory entries, keyed by "firmKey::itemKey"
+// (and "*::itemKey" for legacy entries with no firm). Shared by both the on-screen
+// (paginated) and export (full) raw material row computations below.
+const buildRawMaterialAdjustmentMaps = (rawFactoryEntries) => {
+  const rawAdjustmentsTotal = rawFactoryEntries.filter(entry => !entry.material_type || entry.material_type === 'raw_material');
+  const adjustmentByItemTotal = rawAdjustmentsTotal.reduce((acc, entry) => {
+    const firmKey = entry.firm_name?.trim().toLowerCase() || '*';
+    const itemKey = entry.item_name?.trim().toLowerCase();
+    if (!itemKey) return acc;
+
+    const qty = Number(entry.qty || 0);
+    const key = `${firmKey}::${itemKey}`;
+    acc[key] = (acc[key] || 0) + (entry.status === 'Factory -' ? -qty : qty);
+    return acc;
+  }, {});
+
+  // For calculation of actual_level: only adjustments on or after INVENTORY_START_DATE
+  const rawAdjustmentsAfter = rawFactoryEntries.filter(entry =>
+    (!entry.material_type || entry.material_type === 'raw_material') &&
+    entry.entry_date && entry.entry_date >= INVENTORY_START_DATE
+  );
+  const adjustmentByItemAfter = rawAdjustmentsAfter.reduce((acc, entry) => {
+    const firmKey = entry.firm_name?.trim().toLowerCase() || '*';
+    const itemKey = entry.item_name?.trim().toLowerCase();
+    if (!itemKey) return acc;
+
+    const qty = Number(entry.qty || 0);
+    const key = `${firmKey}::${itemKey}`;
+    acc[key] = (acc[key] || 0) + (entry.status === 'Factory -' ? -qty : qty);
+    return acc;
+  }, {});
+
+  return { adjustmentByItemTotal, adjustmentByItemAfter };
+};
+
+// Computes the same derived fields (rate, status, totals, etc.) for one raw material row,
+// regardless of whether it came from the paginated on-screen list or the full unpaginated
+// export list. `extraRateSiblingSource` / `finesSiblingSource` let each caller control which
+// item list is searched for sibling rates (Lumps, Grains, etc.) without changing that behavior
+// for the other caller.
+const computeProcessedRawMaterialItem = (item, {
+  adjustmentByItemTotal,
+  adjustmentByItemAfter,
+  crushingCostMap,
+  semiProcessingCostMap,
+  extraRateSiblingSource,
+  finesSiblingSource
+}) => {
+  const firmKey = item.firm_name?.trim().toLowerCase();
+  const itemKey = item.item_name?.trim().toLowerCase();
+
+  const firmAdjustmentTotal = adjustmentByItemTotal[`${firmKey}::${itemKey}`] || 0;
+  const legacyAdjustmentTotal = adjustmentByItemTotal[`*::${itemKey}`] || 0;
+
+  const firmAdjustmentAfter = adjustmentByItemAfter[`${firmKey}::${itemKey}`] || 0;
+  const legacyAdjustmentAfter = adjustmentByItemAfter[`*::${itemKey}`] || 0;
+
+  const adjustedActualLevel = item.actual_level != null
+    ? Number(item.actual_level) + firmAdjustmentAfter + legacyAdjustmentAfter
+    : item.actual_level;
+  const actual = adjustedActualLevel != null ? Number(adjustedActualLevel) : null;
+  const optimum = item.optimum_stock != null ? Number(item.optimum_stock) : null;
+
+  // Calculate D. Con dynamically (Annu. Con / 300)
+  const annual = item.annu_con != null ? Number(item.annu_con) : null;
+  const calculatedDCon = (annual !== null && !isNaN(annual)) ? (annual / 300) : (item.d_con != null ? Number(item.d_con) : null);
+
+  let status = '';
+  const maxStock = item.max_stock != null ? Number(item.max_stock) : null;
+
+  if (actual !== null && maxStock !== null && maxStock !== 0) {
+    if (actual === 0) {
+      status = 'No Stock';
+    } else if (actual > maxStock) {
+      status = 'Excess Stock';
+    } else {
+      const ratio = actual / maxStock;
+      if (ratio >= 0.66) {
+        status = 'Normal Stock';
+      } else if (ratio >= 0.33) {
+        status = 'Medium Stock';
+      } else {
+        status = 'Low Stock';
+      }
+    }
+  } else if (actual !== null && optimum !== null && optimum !== 0) {
+    const pct = (actual / optimum) * 100;
+    if (pct < 33) {
+      status = 'Low Stock';
+    } else if (pct >= 33 && pct < 66) {
+      status = 'Medium Stock';
+    } else if (pct >= 66 && pct <= 100) {
+      status = 'Normal Stock';
+    } else {
+      status = 'Excess Stock';
+    }
+  } else {
+    status = item.colour || '';
+  }
+
+  // Crushing actual processing cost: match firm + item name strictly to finished goods in crushing_actual
+  const crushingRate = (() => {
+    if (!firmKey || !itemKey) return null;
+    const directKey = `${firmKey}::${itemKey}`;
+    return crushingCostMap[directKey] != null ? crushingCostMap[directKey] : null;
+  })();
+
+  // Semi processing actual cost
+  const semiProcessingCost = (() => {
+    if (!firmKey || !itemKey) return null;
+    const directKey = `${firmKey}::${itemKey}`;
+    return semiProcessingCostMap[directKey] != null ? semiProcessingCostMap[directKey] : null;
+  })();
+
+  const purchaseRate = Number(item.product_rate || 0);
+  const semiCost = semiProcessingCost != null ? Number(semiProcessingCost) : 0;
+
+  // "<Base> Fines" products with a semi processing cost: prefer the Fines item's own
+  // purchase rate when available. Only when purchase has no rate for the Fines item
+  // itself do we fall back to a sibling's rate — "<Base> (0-1)", "<Base> (1-3)",
+  // "<Base> (3-5)" all carry the same rate, so take that one rate, not a sum of all three.
+  let finesGrainsRate = null;
+  const finesMatch = itemKey && itemKey.match(/^(.*)\s+fines$/);
+  if (finesMatch && semiCost > 0 && purchaseRate <= 0) {
+    const base = finesMatch[1].trim();
+    const grainSuffixes = ['(0-1)', '(1-3)', '(3-5)', '(3-8)', '(5-8)'];
+    for (const suffix of grainSuffixes) {
+      const grainItem = finesSiblingSource.find(
+        (i) => i.firm_name?.trim().toLowerCase() === firmKey && i.item_name?.trim().toLowerCase() === `${base} ${suffix}`
+      );
+      if (grainItem && Number(grainItem.product_rate) > 0) {
+        finesGrainsRate = Number(grainItem.product_rate);
+        break;
+      }
+    }
+
+    // Families that don't use grain-size naming (e.g. P14: Green/Clinker/Fines, or
+    // 99 C: Green/Fired/Fines) fall back to "<Base> Clinker" / "<Base> Fired" — using
+    // that sibling's own fully-priced rate (its material rate plus ITS OWN semi
+    // processing cost, i.e. what actually shows in its Product Rate column), since
+    // Fines is a further byproduct of that same intermediate product.
+    if (finesGrainsRate === null) {
+      const processedSuffixes = ['clinker', 'fired'];
+      for (const suffix of processedSuffixes) {
+        const processedItem = finesSiblingSource.find(
+          (i) => i.firm_name?.trim().toLowerCase() === firmKey && i.item_name?.trim().toLowerCase() === `${base} ${suffix}`
+        );
+        if (processedItem) {
+          const processedItemKey = processedItem.item_name?.trim().toLowerCase();
+          const processedItemCost = Number(semiProcessingCostMap[`${firmKey}::${processedItemKey}`] || 0);
+          const processedFullRate = Number(processedItem.product_rate || 0) + processedItemCost;
+          if (processedFullRate > 0) {
+            finesGrainsRate = processedFullRate;
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  const effectivePurchaseRate = purchaseRate > 0 ? purchaseRate : (finesGrainsRate !== null ? finesGrainsRate : purchaseRate);
+  // Fines rate sourced directly from its own purchase data already reflects the final
+  // rate: don't add the processing cost on top. The processing cost only applies when
+  // the rate was derived from production components (grains, or lumps directly).
+  const isFinesOwnPurchaseRate = finesMatch && purchaseRate > 0 && item.is_purchase_rate === true;
+  const baseProductRate = crushingRate != null && crushingRate > 0
+    ? crushingRate
+    : (effectivePurchaseRate + (isFinesOwnPurchaseRate ? 0 : semiCost));
+  let extraRate = 0;
+  let extraLabel = '';
+
+  if (baseProductRate > 0) {
+    if (['insulator (0-1)', 'insulator (1-3)', 'insulator (3-5)', 'insulator grains'].includes(itemKey)) {
+      const lumpsItem = extraRateSiblingSource.find(
+        (i) => i.firm_name?.trim().toLowerCase() === firmKey && i.item_name?.trim().toLowerCase() === 'insulator lumps'
+      );
+      if (lumpsItem) {
+        extraRate = Number(lumpsItem.product_rate) || 0;
+        extraLabel = 'Lumps';
+      }
+    } else if (['ferro chrome (0-1)', 'ferro chrome (1-3)', 'ferro chrome (3-5)'].includes(itemKey)) {
+      const slagItem = extraRateSiblingSource.find(
+        (i) => i.firm_name?.trim().toLowerCase() === firmKey && i.item_name?.trim().toLowerCase() === 'ferro chrome slag'
+      );
+      if (slagItem) {
+        extraRate = Number(slagItem.product_rate) || 0;
+        extraLabel = 'Slag';
+      }
+    } else if (['mc - 90 (0-1)', 'mc - 90 (1-3)', 'mc - 90 (3-5)', 'mc - 90 (3-8)', 'mc - 90 (5-8)'].includes(itemKey)) {
+      // These grains are crushed from "MC - 90 Lumps" (crushing_actual), so baseProductRate
+      // above is only the crushing Processing Cost — add the Lumps rate on top, same as the
+      // Insulator/Ferro Chrome families.
+      const lumpsItem = finesSiblingSource.find(
+        (i) => i.firm_name?.trim().toLowerCase() === firmKey && i.item_name?.trim().toLowerCase() === 'mc - 90 lumps'
+      );
+      if (lumpsItem) {
+        extraRate = Number(lumpsItem.product_rate) || 0;
+        extraLabel = 'Lumps';
+      }
+    }
+  }
+
+  return {
+    ...item,
+    stock_adjustment: firmAdjustmentTotal + legacyAdjustmentTotal,
+    actual_level: actual,
+    d_con: calculatedDCon !== null ? calculatedDCon : item.d_con,
+    optimum_stock_total: calculateOptimumStockTotal(optimum, baseProductRate),
+    stock_total: calculateStockTotal(actual, baseProductRate),
+    status,
+    colour: status,
+    colour_group: getColourForStatus(status),
+    crushing_product_rate: crushingRate,
+    semi_processing_cost: semiCost > 0 ? semiCost : null,
+    added_extra_rate: extraRate > 0 ? extraRate : null,
+    added_extra_label: extraLabel,
+    fines_grains_rate: finesGrainsRate,
+  };
+};
 
 const BranchInventory = () => {
   const { branchName: routeBranchName } = useParams();
@@ -463,16 +693,6 @@ const BranchInventory = () => {
     }
   };
 
-  const getColourForStatus = (status) => {
-    if (!status) return '';
-    const s = String(status).trim().toLowerCase();
-    if (s === 'no stock' || s === 'low stock' || s === 'red') return 'Red';
-    if (s === 'medium stock' || s === 'orange') return 'Orange';
-    if (s === 'normal stock' || s === 'green') return 'Green';
-    if (s === 'excess stock' || s === 'purple') return 'Purple';
-    return '';
-  };
-
   const finishGoodColumns = [
     { header: 'S.N.', accessor: '_sn', render: (row, rowIndex) => rowIndex + 1 },
     { header: 'Firm Name', accessor: 'firm_name' },
@@ -703,217 +923,24 @@ const BranchInventory = () => {
     },
   ];
 
-  // Process data to compute status for each row
+  // Process data to compute status for each row (current page only, as shown on screen)
   const processedInventoryItems = React.useMemo(() => {
     if (type !== 'raw_material') return inventoryItems;
 
-    // For display in Stock Adjustment column: sum of all adjustments
-    const rawAdjustmentsTotal = rawFactoryEntries.filter(entry => !entry.material_type || entry.material_type === 'raw_material');
-    const adjustmentByItemTotal = rawAdjustmentsTotal.reduce((acc, entry) => {
-      const firmKey = entry.firm_name?.trim().toLowerCase() || '*';
-      const itemKey = entry.item_name?.trim().toLowerCase();
-      if (!itemKey) return acc;
+    const { adjustmentByItemTotal, adjustmentByItemAfter } = buildRawMaterialAdjustmentMaps(rawFactoryEntries);
+    // Look up sibling rates (Fines' grains, MC-90's Lumps) in `totalsItems` (the unpaginated
+    // fetch), not the paginated `inventoryItems`, since a sibling can easily land on a
+    // different page and would otherwise never be found.
+    const finesSiblingSource = totalsItems.length > 0 ? totalsItems : inventoryItems;
 
-      const qty = Number(entry.qty || 0);
-      const key = `${firmKey}::${itemKey}`;
-      acc[key] = (acc[key] || 0) + (entry.status === 'Factory -' ? -qty : qty);
-      return acc;
-    }, {});
-
-    // For calculation of actual_level: only adjustments on or after INVENTORY_START_DATE
-    const rawAdjustmentsAfter = rawFactoryEntries.filter(entry => 
-      (!entry.material_type || entry.material_type === 'raw_material') &&
-      entry.entry_date && entry.entry_date >= INVENTORY_START_DATE
-    );
-    const adjustmentByItemAfter = rawAdjustmentsAfter.reduce((acc, entry) => {
-      const firmKey = entry.firm_name?.trim().toLowerCase() || '*';
-      const itemKey = entry.item_name?.trim().toLowerCase();
-      if (!itemKey) return acc;
-
-      const qty = Number(entry.qty || 0);
-      const key = `${firmKey}::${itemKey}`;
-      acc[key] = (acc[key] || 0) + (entry.status === 'Factory -' ? -qty : qty);
-      return acc;
-    }, {});
-
-    return inventoryItems.map(item => {
-      const firmKey = item.firm_name?.trim().toLowerCase();
-      const itemKey = item.item_name?.trim().toLowerCase();
-      
-      const firmAdjustmentTotal = adjustmentByItemTotal[`${firmKey}::${itemKey}`] || 0;
-      const legacyAdjustmentTotal = adjustmentByItemTotal[`*::${itemKey}`] || 0;
-
-      const firmAdjustmentAfter = adjustmentByItemAfter[`${firmKey}::${itemKey}`] || 0;
-      const legacyAdjustmentAfter = adjustmentByItemAfter[`*::${itemKey}`] || 0;
-
-      const adjustedActualLevel = item.actual_level != null
-        ? Number(item.actual_level) + firmAdjustmentAfter + legacyAdjustmentAfter
-        : item.actual_level;
-      const actual = adjustedActualLevel != null ? Number(adjustedActualLevel) : null;
-      const optimum = item.optimum_stock != null ? Number(item.optimum_stock) : null;
-
-      // Calculate D. Con dynamically (Annu. Con / 300)
-      const annual = item.annu_con != null ? Number(item.annu_con) : null;
-      const calculatedDCon = (annual !== null && !isNaN(annual)) ? (annual / 300) : (item.d_con != null ? Number(item.d_con) : null);
-
-      let status = '';
-      const maxStock = item.max_stock != null ? Number(item.max_stock) : null;
-
-      if (actual !== null && maxStock !== null && maxStock !== 0) {
-        if (actual === 0) {
-          status = 'No Stock';
-        } else if (actual > maxStock) {
-          status = 'Excess Stock';
-        } else {
-          const ratio = actual / maxStock;
-          if (ratio >= 0.66) {
-            status = 'Normal Stock';
-          } else if (ratio >= 0.33) {
-            status = 'Medium Stock';
-          } else {
-            status = 'Low Stock';
-          }
-        }
-      } else if (actual !== null && optimum !== null && optimum !== 0) {
-        const pct = (actual / optimum) * 100;
-        if (pct < 33) {
-          status = 'Low Stock';
-        } else if (pct >= 33 && pct < 66) {
-          status = 'Medium Stock';
-        } else if (pct >= 66 && pct <= 100) {
-          status = 'Normal Stock';
-        } else {
-          status = 'Excess Stock';
-        }
-      } else {
-        status = item.colour || '';
-      }
-
-      // Crushing actual processing cost: match firm + item name strictly to finished goods in crushing_actual
-      const crushingRate = (() => {
-        if (!firmKey || !itemKey) return null;
-        const directKey = `${firmKey}::${itemKey}`;
-        return crushingCostMap[directKey] != null ? crushingCostMap[directKey] : null;
-      })();
-
-      // Semi processing actual cost
-      const semiProcessingCost = (() => {
-        if (!firmKey || !itemKey) return null;
-        const directKey = `${firmKey}::${itemKey}`;
-        return semiProcessingCostMap[directKey] != null ? semiProcessingCostMap[directKey] : null;
-      })();
-
-      const purchaseRate = Number(item.product_rate || 0);
-      const semiCost = semiProcessingCost != null ? Number(semiProcessingCost) : 0;
-
-      // "<Base> Fines" products with a semi processing cost: prefer the Fines item's own
-      // purchase rate when available. Only when purchase has no rate for the Fines item
-      // itself do we fall back to a sibling's rate — "<Base> (0-1)", "<Base> (1-3)",
-      // "<Base> (3-5)" all carry the same rate, so take that one rate, not a sum of all three.
-      let finesGrainsRate = null;
-      const finesMatch = itemKey && itemKey.match(/^(.*)\s+fines$/);
-      if (finesMatch && semiCost > 0 && purchaseRate <= 0) {
-        const base = finesMatch[1].trim();
-        const grainSuffixes = ['(0-1)', '(1-3)', '(3-5)', '(3-8)', '(5-8)'];
-        // Look up siblings in `totalsItems` (the unpaginated fetch), not the paginated
-        // `inventoryItems` table data, since a grain sibling can easily land on a
-        // different page than the "Fines" row and would otherwise never be found.
-        const siblingSource = totalsItems.length > 0 ? totalsItems : inventoryItems;
-        for (const suffix of grainSuffixes) {
-          const grainItem = siblingSource.find(
-            (i) => i.firm_name?.trim().toLowerCase() === firmKey && i.item_name?.trim().toLowerCase() === `${base} ${suffix}`
-          );
-          if (grainItem && Number(grainItem.product_rate) > 0) {
-            finesGrainsRate = Number(grainItem.product_rate);
-            break;
-          }
-        }
-
-        // Families that don't use grain-size naming (e.g. P14: Green/Clinker/Fines, or
-        // 99 C: Green/Fired/Fines) fall back to "<Base> Clinker" / "<Base> Fired" — using
-        // that sibling's own fully-priced rate (its material rate plus ITS OWN semi
-        // processing cost, i.e. what actually shows in its Product Rate column), since
-        // Fines is a further byproduct of that same intermediate product.
-        if (finesGrainsRate === null) {
-          const processedSuffixes = ['clinker', 'fired'];
-          for (const suffix of processedSuffixes) {
-            const processedItem = siblingSource.find(
-              (i) => i.firm_name?.trim().toLowerCase() === firmKey && i.item_name?.trim().toLowerCase() === `${base} ${suffix}`
-            );
-            if (processedItem) {
-              const processedItemKey = processedItem.item_name?.trim().toLowerCase();
-              const processedItemCost = Number(semiProcessingCostMap[`${firmKey}::${processedItemKey}`] || 0);
-              const processedFullRate = Number(processedItem.product_rate || 0) + processedItemCost;
-              if (processedFullRate > 0) {
-                finesGrainsRate = processedFullRate;
-                break;
-              }
-            }
-          }
-        }
-      }
-
-      const effectivePurchaseRate = purchaseRate > 0 ? purchaseRate : (finesGrainsRate !== null ? finesGrainsRate : purchaseRate);
-      // Fines rate sourced directly from its own purchase data already reflects the final
-      // rate: don't add the processing cost on top. The processing cost only applies when
-      // the rate was derived from production components (grains, or lumps directly).
-      const isFinesOwnPurchaseRate = finesMatch && purchaseRate > 0 && item.is_purchase_rate === true;
-      const baseProductRate = crushingRate != null && crushingRate > 0
-        ? crushingRate
-        : (effectivePurchaseRate + (isFinesOwnPurchaseRate ? 0 : semiCost));
-      let extraRate = 0;
-      let extraLabel = '';
-      
-      if (baseProductRate > 0) {
-        if (['insulator (0-1)', 'insulator (1-3)', 'insulator (3-5)', 'insulator grains'].includes(itemKey)) {
-          const lumpsItem = inventoryItems.find(
-            (i) => i.firm_name?.trim().toLowerCase() === firmKey && i.item_name?.trim().toLowerCase() === 'insulator lumps'
-          );
-          if (lumpsItem) {
-            extraRate = Number(lumpsItem.product_rate) || 0;
-            extraLabel = 'Lumps';
-          }
-        } else if (['ferro chrome (0-1)', 'ferro chrome (1-3)', 'ferro chrome (3-5)'].includes(itemKey)) {
-          const slagItem = inventoryItems.find(
-            (i) => i.firm_name?.trim().toLowerCase() === firmKey && i.item_name?.trim().toLowerCase() === 'ferro chrome slag'
-          );
-          if (slagItem) {
-            extraRate = Number(slagItem.product_rate) || 0;
-            extraLabel = 'Slag';
-          }
-        } else if (['mc - 90 (0-1)', 'mc - 90 (1-3)', 'mc - 90 (3-5)', 'mc - 90 (3-8)', 'mc - 90 (5-8)'].includes(itemKey)) {
-          // These grains are crushed from "MC - 90 Lumps" (crushing_actual), so baseProductRate
-          // above is only the crushing Processing Cost — add the Lumps rate on top, same as the
-          // Insulator/Ferro Chrome families. Look up in `totalsItems` (unpaginated), not the
-          // paginated `inventoryItems`, since Lumps can land on a different page than the grains.
-          const siblingSource = totalsItems.length > 0 ? totalsItems : inventoryItems;
-          const lumpsItem = siblingSource.find(
-            (i) => i.firm_name?.trim().toLowerCase() === firmKey && i.item_name?.trim().toLowerCase() === 'mc - 90 lumps'
-          );
-          if (lumpsItem) {
-            extraRate = Number(lumpsItem.product_rate) || 0;
-            extraLabel = 'Lumps';
-          }
-        }
-      }
-
-      return {
-        ...item,
-        stock_adjustment: firmAdjustmentTotal + legacyAdjustmentTotal,
-        actual_level: actual,
-        d_con: calculatedDCon !== null ? calculatedDCon : item.d_con,
-        optimum_stock_total: calculateOptimumStockTotal(optimum, baseProductRate),
-        stock_total: calculateStockTotal(actual, baseProductRate),
-        status,
-        colour: status,
-        colour_group: getColourForStatus(status),
-        crushing_product_rate: crushingRate,
-        semi_processing_cost: semiCost > 0 ? semiCost : null,
-        added_extra_rate: extraRate > 0 ? extraRate : null,
-        added_extra_label: extraLabel,
-        fines_grains_rate: finesGrainsRate,
-      };
-    });
+    return inventoryItems.map(item => computeProcessedRawMaterialItem(item, {
+      adjustmentByItemTotal,
+      adjustmentByItemAfter,
+      crushingCostMap,
+      semiProcessingCostMap,
+      extraRateSiblingSource: inventoryItems,
+      finesSiblingSource
+    }));
   }, [inventoryItems, totalsItems, type, rawFactoryEntries, crushingCostMap, semiProcessingCostMap]);
 
   const displayedInventoryItems = React.useMemo(() => {
@@ -956,6 +983,49 @@ const BranchInventory = () => {
       s_no: index + 1
     }));
   }, [processedInventoryItems, accessibleBranchOptions, isFinishGood]);
+
+  // Fetches the complete raw material list fresh (not from any pre-loaded background state,
+  // which can still be loading or go stale) and runs it through the same computation used
+  // for the on-screen rows, so "Export CSV" always reflects every matching item regardless
+  // of the current page / rows-per-page selection. Called on demand by the Table's export
+  // button (see fetchExportData prop below) — never pre-fetched, so there's no readiness
+  // race to get wrong.
+  const fetchExportRawMaterialItems = React.useCallback(async () => {
+    const response = await apiService.getInventory(activeBranch, INVENTORY_START_DATE, 1, 100000, '', firmFilter);
+    const items = response.data || [];
+
+    const { adjustmentByItemTotal, adjustmentByItemAfter } = buildRawMaterialAdjustmentMaps(rawFactoryEntries);
+    const processed = items.map(item => computeProcessedRawMaterialItem(item, {
+      adjustmentByItemTotal,
+      adjustmentByItemAfter,
+      crushingCostMap,
+      semiProcessingCostMap,
+      extraRateSiblingSource: items,
+      finesSiblingSource: items
+    }));
+
+    const filtered = processed.filter(item => {
+      const firmName = item.firm_name || '';
+      const normFirm = firmName.toLowerCase().trim() === 'madhya' ? 'pmmpl' : firmName.toLowerCase().trim();
+      return accessibleBranchOptions.some(b => {
+        const normB = b.toLowerCase().trim() === 'madhya' ? 'pmmpl' : b.toLowerCase().trim();
+        return normFirm === normB;
+      });
+    });
+
+    const sorted = [...filtered].sort((a, b) => {
+      const nameA = (a.item_name || '').toLowerCase();
+      const nameB = (b.item_name || '').toLowerCase();
+      if (nameA < nameB) return -1;
+      if (nameA > nameB) return 1;
+      return 0;
+    });
+
+    return sorted.map((item, index) => ({
+      ...item,
+      s_no: index + 1
+    }));
+  }, [activeBranch, firmFilter, rawFactoryEntries, crushingCostMap, semiProcessingCostMap, accessibleBranchOptions]);
 
   const totals = React.useMemo(() => {
     const res = {
@@ -1182,6 +1252,7 @@ const BranchInventory = () => {
               data={displayedInventoryItems}
               searchPlaceholder="Search materials by name..."
               exportFileName={`${activeBranch}_${type}_inventory`}
+              fetchExportData={type === 'raw_material' ? fetchExportRawMaterialItems : undefined}
               legend={!isFinishGood ? [
                 { label: 'Excess Stock (>100%)', color: '#a855f7', value: 'Purple' },
                 { label: 'Normal Stock (66-100%)', color: '#16a34a', value: 'Green' },

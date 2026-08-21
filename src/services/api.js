@@ -1678,117 +1678,97 @@ export const apiService = {
   },
 
   addInventory: async (branch, item) => {
-    const itemForSave = {
-      ...item,
-      optimum_stock_total: calculateOptimumStockTotal(item.optimum_stock, item.product_rate),
-      stock_total: calculateStockTotal(item.actual_level, item.product_rate)
-    };
-
     try {
-      const getTableName = (bName) => {
+      const getFirmName = (bName) => {
         const b = bName ? bName.toLowerCase().trim() : '';
-        if (b === 'purab') return 'purab_stock';
-        if (b === 'rkl') return 'rkl_stock';
-        if (b === 'pmmpl' || b === 'madhya') return 'madhya_stock';
-        return 'purab_stock';
+        if (b === 'purab') return 'Purab';
+        if (b === 'rkl') return 'Rkl';
+        if (b === 'pmmpl' || b === 'madhya') return 'Pmmpl';
+        return bName || 'Purab';
       };
 
-      const tableName = getTableName(branch);
+      const firmName = getFirmName(branch);
+      const itemName = item.item_name || item.itemName;
       const { data, error } = await supabase
-        .from(tableName)
+        .from('inventory_master')
         .insert([{
-          s_no: itemForSave.s_no !== undefined && itemForSave.s_no !== '' ? Number(itemForSave.s_no) : null,
-          item_name: itemForSave.item_name || itemForSave.itemName,
-          annu_con: itemForSave.annu_con !== undefined && itemForSave.annu_con !== '' ? Number(itemForSave.annu_con) : null,
-          d_con: itemForSave.d_con !== undefined && itemForSave.d_con !== '' ? Number(itemForSave.d_con) : null,
-          sf: itemForSave.sf !== undefined && itemForSave.sf !== '' ? Number(itemForSave.sf) : null,
-          lead_time: itemForSave.lead_time !== undefined && itemForSave.lead_time !== '' ? Number(itemForSave.lead_time) : null,
-          max_stock: itemForSave.max_stock !== undefined && itemForSave.max_stock !== '' ? Number(itemForSave.max_stock) : null,
-          optimum_stock: itemForSave.optimum_stock !== undefined && itemForSave.optimum_stock !== '' ? Number(itemForSave.optimum_stock) : null,
-          actual_level: itemForSave.actual_level !== undefined && itemForSave.actual_level !== '' ? Number(itemForSave.actual_level) : null,
-          product_rate: itemForSave.product_rate !== undefined && itemForSave.product_rate !== '' ? Number(itemForSave.product_rate) : null,
-          optimum_stock_total: itemForSave.optimum_stock_total !== '' ? Number(itemForSave.optimum_stock_total) : null,
-          stock_total: itemForSave.stock_total !== '' ? Number(itemForSave.stock_total) : null,
-          unit: itemForSave.unit,
-          colour: itemForSave.colour
+          firm_name: firmName,
+          item_name: itemName,
+          unit: item.unit || 'MT',
+          annu_con: item.annu_con !== undefined && item.annu_con !== '' ? Number(item.annu_con) : 0,
+          safety_factor: item.sf !== undefined && item.sf !== '' ? Number(item.sf) : 1,
+          lead_time_days: item.lead_time !== undefined && item.lead_time !== '' ? Number(item.lead_time) : 0,
+          max_qty: item.max_stock !== undefined && item.max_stock !== '' ? Number(item.max_stock) : (item.max_qty !== undefined ? Number(item.max_qty) : 0),
+          optimum_qty: item.optimum_stock !== undefined && item.optimum_stock !== '' ? Number(item.optimum_stock) : (item.optimum_qty !== undefined ? Number(item.optimum_qty) : 0),
+          op_stock: item.op_stock !== undefined && item.op_stock !== '' ? Number(item.op_stock) : (item.actual_level !== undefined && item.actual_level !== '' ? Number(item.actual_level) : 0),
+          op_stock_date: item.op_stock_date || null
         }])
         .select();
 
       if (error) throw error;
       return { success: true, item: data[0] };
     } catch (e) {
-      console.warn(`Supabase addInventory for ${branch} failed, trying mock fallback:`, e.message);
-      return mockDb.mockAddInventory(branch, itemForSave);
+      console.warn(`Supabase addInventory for ${branch} failed:`, e.message);
+      throw e;
     }
   },
 
   updateInventory: async (branch, itemId, updatedFields) => {
-    const fieldsForSave = {
-      ...updatedFields,
-      optimum_stock_total: calculateOptimumStockTotal(updatedFields.optimum_stock, updatedFields.product_rate),
-      stock_total: calculateStockTotal(updatedFields.actual_level, updatedFields.product_rate)
-    };
-
     try {
-      const getTableName = (bName) => {
-        const b = bName ? bName.toLowerCase().trim() : '';
-        if (b === 'purab') return 'purab_stock';
-        if (b === 'rkl') return 'rkl_stock';
-        if (b === 'pmmpl' || b === 'madhya') return 'madhya_stock';
-        return 'purab_stock';
-      };
+      const payload = {};
+      if (updatedFields.item_name || updatedFields.itemName) {
+        payload.item_name = updatedFields.item_name || updatedFields.itemName;
+      }
+      if (updatedFields.unit !== undefined) payload.unit = updatedFields.unit;
+      if (updatedFields.annu_con !== undefined && updatedFields.annu_con !== '') {
+        payload.annu_con = Number(updatedFields.annu_con);
+      }
+      if (updatedFields.sf !== undefined && updatedFields.sf !== '') {
+        payload.safety_factor = Number(updatedFields.sf);
+      }
+      if (updatedFields.lead_time !== undefined && updatedFields.lead_time !== '') {
+        payload.lead_time_days = Number(updatedFields.lead_time);
+      }
+      if (updatedFields.max_stock !== undefined && updatedFields.max_stock !== '') {
+        payload.max_qty = Number(updatedFields.max_stock);
+      } else if (updatedFields.max_qty !== undefined && updatedFields.max_qty !== '') {
+        payload.max_qty = Number(updatedFields.max_qty);
+      }
+      if (updatedFields.optimum_stock !== undefined && updatedFields.optimum_stock !== '') {
+        payload.optimum_qty = Number(updatedFields.optimum_stock);
+      } else if (updatedFields.optimum_qty !== undefined && updatedFields.optimum_qty !== '') {
+        payload.optimum_qty = Number(updatedFields.optimum_qty);
+      }
+      if (updatedFields.op_stock !== undefined && updatedFields.op_stock !== '') {
+        payload.op_stock = Number(updatedFields.op_stock);
+      }
 
-      const tableName = getTableName(branch);
       const { data, error } = await supabase
-        .from(tableName)
-        .update({
-          s_no: fieldsForSave.s_no !== undefined ? (fieldsForSave.s_no !== '' ? Number(fieldsForSave.s_no) : null) : undefined,
-          item_name: fieldsForSave.item_name || fieldsForSave.itemName,
-          annu_con: fieldsForSave.annu_con !== undefined && fieldsForSave.annu_con !== '' ? Number(fieldsForSave.annu_con) : undefined,
-          d_con: fieldsForSave.d_con !== undefined && fieldsForSave.d_con !== '' ? Number(fieldsForSave.d_con) : undefined,
-          sf: fieldsForSave.sf !== undefined && fieldsForSave.sf !== '' ? Number(fieldsForSave.sf) : undefined,
-          lead_time: fieldsForSave.lead_time !== undefined && fieldsForSave.lead_time !== '' ? Number(fieldsForSave.lead_time) : undefined,
-          max_stock: fieldsForSave.max_stock !== undefined ? (fieldsForSave.max_stock !== null && fieldsForSave.max_stock !== '' ? Number(fieldsForSave.max_stock) : null) : undefined,
-          optimum_stock: fieldsForSave.optimum_stock !== undefined ? (fieldsForSave.optimum_stock !== null && fieldsForSave.optimum_stock !== '' ? Number(fieldsForSave.optimum_stock) : null) : undefined,
-          actual_level: fieldsForSave.actual_level !== undefined && fieldsForSave.actual_level !== '' ? Number(fieldsForSave.actual_level) : undefined,
-          product_rate: fieldsForSave.product_rate !== undefined && fieldsForSave.product_rate !== '' ? Number(fieldsForSave.product_rate) : undefined,
-          optimum_stock_total: fieldsForSave.optimum_stock_total !== '' ? Number(fieldsForSave.optimum_stock_total) : null,
-          stock_total: fieldsForSave.stock_total !== '' ? Number(fieldsForSave.stock_total) : null,
-          unit: fieldsForSave.unit,
-          colour: fieldsForSave.colour
-        })
+        .from('inventory_master')
+        .update(payload)
         .eq('id', itemId)
         .select();
 
       if (error) throw error;
       return { success: true, item: data[0] };
     } catch (e) {
-      console.warn(`Supabase updateInventory for ${branch} failed, trying mock fallback:`, e.message);
-      return mockDb.mockUpdateInventory(branch, itemId, fieldsForSave);
+      console.warn(`Supabase updateInventory for ${branch} failed:`, e.message);
+      throw e;
     }
   },
 
   deleteInventory: async (branch, itemId) => {
     try {
-      const getTableName = (bName) => {
-        const b = bName ? bName.toLowerCase().trim() : '';
-        if (b === 'purab') return 'purab_stock';
-        if (b === 'rkl') return 'rkl_stock';
-        if (b === 'pmmpl' || b === 'madhya') return 'madhya_stock';
-        return 'purab_stock';
-      };
-
-      const tableName = getTableName(branch);
       const { error } = await supabase
-        .from(tableName)
+        .from('inventory_master')
         .delete()
         .eq('id', itemId);
 
       if (error) throw error;
       return { success: true };
     } catch (e) {
-      console.warn(`Supabase deleteInventory for ${branch} failed, trying mock fallback:`, e.message);
-      return mockDb.mockDeleteInventory(branch, itemId);
+      console.warn(`Supabase deleteInventory for ${branch} failed:`, e.message);
+      throw e;
     }
   },
 
