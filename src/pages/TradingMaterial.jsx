@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Plus, Repeat } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import GlassCard from '../components/GlassCard';
 import Modal from '../components/Modal';
 import Table from '../components/Table';
 import { useToast } from '../components/Toast';
+import { useAuth } from '../hooks/useAuth';
 import { supabase, purchaseSupabase, orderSupabase } from '../services/supabaseClient';
 
 const branchOptions = ['Purab', 'Pmmpl', 'Rkl'];
@@ -218,6 +219,7 @@ const fetchStockAdjustmentMap = async () => {
 
 const TradingMaterial = () => {
   const { showSuccess, showError } = useToast();
+  const { user, canAccessBranch } = useAuth();
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [formOpen, setFormOpen] = useState(false);
@@ -226,6 +228,13 @@ const TradingMaterial = () => {
   const [salesMap, setSalesMap] = useState({});
   const [salesReturnMap, setSalesReturnMap] = useState({});
   const [stockAdjustmentMap, setStockAdjustmentMap] = useState({});
+
+  const accessibleBranchOptions = useMemo(() => {
+    return branchOptions.filter(branch => canAccessBranch(branch, 'trading_material'));
+  }, [canAccessBranch]);
+
+  const hasAccess = user?.role === 'Admin' || accessibleBranchOptions.length > 0;
+  const isEditable = accessibleBranchOptions.length > 0 && user?.role !== 'Viewer';
 
   const {
     register,
@@ -305,7 +314,12 @@ const TradingMaterial = () => {
     }
   };
 
-  const tableRows = rows.map((row, index) => {
+  const visibleRows = useMemo(() => {
+    if (user?.role === 'Admin') return rows;
+    return rows.filter(row => canAccessBranch(row.firm_name, 'trading_material'));
+  }, [rows, user, canAccessBranch]);
+
+  const tableRows = visibleRows.map((row, index) => {
     const key = `${normalizeFirmKey(row.firm_name)}::${normalizeItemKey(row.product_name)}`;
     const opStock = Number(row.op_stock || 0);
     const dbStockAdjustment = Number(row.stock_adjustment || 0);
@@ -349,6 +363,20 @@ const TradingMaterial = () => {
     },
   ];
 
+  if (!loading && !hasAccess) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[400px] text-center p-6 space-y-3">
+        <div className="w-12 h-12 rounded-2xl bg-amber-500/10 flex items-center justify-center text-amber-500">
+          <Repeat className="w-6 h-6" />
+        </div>
+        <h3 className="text-base font-bold text-(--ink)">Access Restricted</h3>
+        <p className="text-xs text-(--ink-muted) max-w-md">
+          You do not have access to view Trading Material for any branch. Please contact your system administrator.
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-5">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
@@ -361,14 +389,16 @@ const TradingMaterial = () => {
             </p>
           </div>
         </div>
-        <button
-          type="button"
-          onClick={openAddForm}
-          className="flex items-center justify-center gap-1.5 px-3.5 py-2 text-xs rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-semibold shadow-md transition-colors cursor-pointer"
-        >
-          <Plus className="w-4.5 h-4.5" />
-          <span>Add Trading Material</span>
-        </button>
+        {isEditable && (
+          <button
+            type="button"
+            onClick={openAddForm}
+            className="flex items-center justify-center gap-1.5 px-3.5 py-2 text-xs rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-semibold shadow-md transition-colors cursor-pointer"
+          >
+            <Plus className="w-4.5 h-4.5" />
+            <span>Add Trading Material</span>
+          </button>
+        )}
       </div>
 
       <GlassCard className="p-2 sm:p-6">
@@ -379,7 +409,7 @@ const TradingMaterial = () => {
           data={tableRows}
           searchPlaceholder="Search trading materials..."
           filterKey="firm_name"
-          filterOptions={branchOptions}
+          filterOptions={accessibleBranchOptions}
           filterPlaceholder="Filter Firm"
           exportFileName="trading_material"
         />
@@ -395,7 +425,7 @@ const TradingMaterial = () => {
                 className="w-full px-3 py-2.5 text-xs rounded-lg glass-input bg-slate-900"
               >
                 <option value="">Select firm...</option>
-                {branchOptions.map((firmName) => (
+                {accessibleBranchOptions.map((firmName) => (
                   <option key={firmName} value={firmName}>{firmName}</option>
                 ))}
               </select>

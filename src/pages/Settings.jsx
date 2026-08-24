@@ -27,6 +27,7 @@ import {
   PackageOpen,
   SlidersHorizontal,
   History as HistoryIcon,
+  Repeat,
 } from 'lucide-react';
 
 // Page access groups — each with sub-pages
@@ -50,6 +51,15 @@ const ALL_PAGE_GROUPS = [
     ]
   },
   {
+    group: 'Trading Material',
+    icon: Repeat,
+    pages: [
+      { key: 'TradingMaterial_Purab', label: 'Purab Branch' },
+      { key: 'TradingMaterial_Pmmpl', label: 'Pmmpl Branch' },
+      { key: 'TradingMaterial_Rkl',   label: 'Rkl Branch' },
+    ]
+  },
+  {
     group: 'Stock Adjustment',
     icon: SlidersHorizontal,
     pages: [
@@ -68,9 +78,9 @@ const ALL_PAGE_GROUPS = [
     ]
   },
   { group: null, pages: [
-    { key: 'Settings',  label: 'System Settings',  icon: Cog },
-    { key: 'Dashboard', label: 'Dashboard',        icon: LayoutDashboard },
-    { key: 'History',   label: 'Stock History',    icon: HistoryIcon },
+    { key: 'Settings',        label: 'System Settings',  icon: Cog },
+    { key: 'Dashboard',       label: 'Dashboard',        icon: LayoutDashboard },
+    { key: 'History',         label: 'Stock History',    icon: HistoryIcon },
   ]},
 ];
 
@@ -79,7 +89,7 @@ const ALL_PAGE_KEYS = ALL_PAGE_GROUPS.flatMap(g => g.pages.map(p => p.key));
 
 // Group a user's raw page_access keys by category so "Purab Branch" etc. only
 // ever appears once per group instead of being repeated for every group that
-// happens to grant that branch (Raw Material / Finish Good / Stock Adjustment).
+// happens to grant that branch (Raw Material / Finish Good / Trading Material / Stock Adjustment).
 const groupPageAccessBadges = (pageAccess = []) => {
   const badges = [];
   ALL_PAGE_GROUPS.forEach(grp => {
@@ -105,18 +115,28 @@ const normalizeBranchName = (value) => value === 'Madhya' ? 'Pmmpl' : value;
 const normalizePageAccessKey = (key) => key
   ?.replace('RawMaterial_Madhya', 'RawMaterial_Pmmpl')
   .replace('FinishGood_Madhya', 'FinishGood_Pmmpl')
-  .replace('StockAdjustment_Madhya', 'StockAdjustment_Pmmpl');
+  .replace('StockAdjustment_Madhya', 'StockAdjustment_Pmmpl')
+  .replace('TradingMaterial_Madhya', 'TradingMaterial_Pmmpl');
 
 const normalizePageAccess = (pageAccess = []) => {
-  const normalized = pageAccess.map(normalizePageAccessKey);
-  if (!normalized.includes('StockAdjustment')) return normalized;
-
-  return [
-    ...normalized.filter(key => key !== 'StockAdjustment'),
-    'StockAdjustment_Purab',
-    'StockAdjustment_Pmmpl',
-    'StockAdjustment_Rkl'
-  ];
+  let normalized = (pageAccess || []).map(normalizePageAccessKey);
+  if (normalized.includes('StockAdjustment')) {
+    normalized = [
+      ...normalized.filter(key => key !== 'StockAdjustment'),
+      'StockAdjustment_Purab',
+      'StockAdjustment_Pmmpl',
+      'StockAdjustment_Rkl'
+    ];
+  }
+  if (normalized.includes('TradingMaterial')) {
+    normalized = [
+      ...normalized.filter(key => key !== 'TradingMaterial'),
+      'TradingMaterial_Purab',
+      'TradingMaterial_Pmmpl',
+      'TradingMaterial_Rkl'
+    ];
+  }
+  return normalized;
 };
 
 const emptyForm = {

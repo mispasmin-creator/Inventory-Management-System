@@ -26,12 +26,18 @@ const TopNav = () => {
     const normalizeBranch = (value) =>
       value?.toLowerCase() === "madhya" ? "Pmmpl" : value;
     const pageAccess = user.page_access || [];
-    const prefix = type === "finish_good" ? "FinishGood" : "RawMaterial";
+    const prefix =
+      type === "finish_good"
+        ? "FinishGood"
+        : type === "trading_material"
+        ? "TradingMaterial"
+        : "RawMaterial";
     const bName = normalizeBranch(branchName.replace(" Branch", ""));
     const legacyBName = bName === "Pmmpl" ? "Madhya" : bName;
     const specificKey = `${prefix}_${bName}`;
     const legacySpecificKey = `${prefix}_${legacyBName}`;
     if (pageAccess.includes(specificKey) || pageAccess.includes(legacySpecificKey)) return true;
+    if (type === "trading_material" && pageAccess.includes("TradingMaterial")) return true;
     if (pageAccess.length > 0) return false;
     if (user.branch === "All") return true;
     if (Array.isArray(user.branch)) {
@@ -42,6 +48,7 @@ const TopNav = () => {
 
   const accessibleBranches = branches.filter((b) => hasBranchAccess(b.name, "raw_material"));
   const accessibleFinishGoodBranches = branches.filter((b) => hasBranchAccess(b.name, "finish_good"));
+  const accessibleTradingMaterialBranches = branches.filter((b) => hasBranchAccess(b.name, "trading_material"));
   const accessibleStockAdjustmentBranches = branches.filter((branch) => {
     if (!user) return false;
     if (user.role === "Admin") return true;
@@ -86,13 +93,14 @@ const TopNav = () => {
       Dashboard:        "Dashboard",
       "Raw Material":   null,
       "Finished Good":  null,
-      "Trading Material": "TradingMaterial",
+      "Trading Material": null,
       "Stock Adjustment": "StockAdjustment",
       History:            "History",
       "System Settings":  "Settings",
     };
     if (item.title === "Raw Material")    return accessibleBranches.length > 0;
     if (item.title === "Finished Good")   return accessibleFinishGoodBranches.length > 0;
+    if (item.title === "Trading Material") return accessibleTradingMaterialBranches.length > 0;
     if (item.title === "Stock Adjustment") {
       return accessibleStockAdjustmentBranches.length > 0;
     }

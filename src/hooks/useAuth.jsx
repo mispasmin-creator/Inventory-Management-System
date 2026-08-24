@@ -51,13 +51,19 @@ export const AuthProvider = ({ children }) => {
     const normalizedBranchName = normalizeBranch(branchName);
     const legacyBranchName = normalizedBranchName === 'Pmmpl' ? 'Madhya' : normalizedBranchName;
 
-    // Check granular page_access keys first (RawMaterial_Purab, FinishGood_Rkl etc.)
+    // Check granular page_access keys first (RawMaterial_Purab, FinishGood_Rkl, TradingMaterial_Purab etc.)
     const pageAccess = user.page_access || [];
-    const prefix = type === 'finish_good' ? 'FinishGood' : 'RawMaterial';
+    const prefix =
+      type === 'finish_good'
+        ? 'FinishGood'
+        : type === 'trading_material'
+        ? 'TradingMaterial'
+        : 'RawMaterial';
     const specificKey = `${prefix}_${normalizedBranchName}`;
     const legacySpecificKey = `${prefix}_${legacyBranchName}`;
 
     if (pageAccess.includes(specificKey) || pageAccess.includes(legacySpecificKey)) return true;
+    if (type === 'trading_material' && pageAccess.includes('TradingMaterial')) return true;
 
     // If page_access is configured, we strictly rely on it and do not fall back
     if (pageAccess.length > 0) return false;
