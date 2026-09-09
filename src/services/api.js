@@ -809,23 +809,27 @@ const buildFinishedGoodPurchaseMap = async (selectedDate = '') => {
 
 const buildFinishedGoodReturnMap = async (selectedDate = '') => {
   const pageSize = 1000;
-  const firmByDoNumber = {};
+  const ordersByDoNumber = {};
   const returnMap = {};
 
   try {
     for (let from = 0; ; from += pageSize) {
       const { data, error } = await orderSupabase
         .from('ORDER RECEIPT')
-        .select('"DO-Delivery Order No.", "Firm Name"')
+        .select('"DO-Delivery Order No.", "Firm Name", "Product Name", "Party Names"')
         .range(from, from + pageSize - 1);
 
       if (error) throw error;
 
       (data || []).forEach((row) => {
         const doNumber = row['DO-Delivery Order No.'];
-        if (doNumber) {
-          firmByDoNumber[doNumber] = row['Firm Name'];
-        }
+        if (!doNumber) return;
+        if (!ordersByDoNumber[doNumber]) ordersByDoNumber[doNumber] = [];
+        ordersByDoNumber[doNumber].push({
+          firm: row['Firm Name'],
+          productKey: normalizeItemKey(row['Product Name']),
+          partyKey: normalizeItemKey(row['Party Names'])
+        });
       });
 
       if (!data || data.length < pageSize) break;
@@ -834,7 +838,7 @@ const buildFinishedGoodReturnMap = async (selectedDate = '') => {
     for (let from = 0; ; from += pageSize) {
       const { data, error } = await orderSupabase
         .from('Material Return')
-        .select('id, "D.O Number", "Product Name", "Qty Of Return Material", "Qty", "Return Dispatched At", "Actual5", "Debit Note Issued At"')
+        .select('id, "D.O Number", "Party Name", "Product Name", "Qty Of Return Material", "Qty", "Return Dispatched At", "Actual5", "Debit Note Issued At"')
         .not('Actual5', 'is', null)
         .not('Debit Note Issued At', 'is', null)
         .range(from, from + pageSize - 1);
@@ -845,8 +849,15 @@ const buildFinishedGoodReturnMap = async (selectedDate = '') => {
         const returnDispatchedAt = row['Return Dispatched At'] || '';
         if (!returnDispatchedAt || String(returnDispatchedAt).trim() === '') return;
 
-        const firmKey = normalizeFirmKey(normalizeOrderFirmName(firmByDoNumber[row['D.O Number']]));
         const productKey = normalizeItemKey(row['Product Name']);
+        const partyKey = normalizeItemKey(row['Party Name']);
+        const candidates = ordersByDoNumber[row['D.O Number']] || [];
+        // Same DO number can be reused across firms, so disambiguate by product + party before falling back.
+        const matchedOrder =
+          candidates.find((c) => c.productKey === productKey && c.partyKey === partyKey) ||
+          candidates.find((c) => c.productKey === productKey) ||
+          (candidates.length === 1 ? candidates[0] : null);
+        const firmKey = normalizeFirmKey(normalizeOrderFirmName(matchedOrder?.firm));
         if (!firmKey || !productKey) return;
 
         const returnQty = Number(row['Qty Of Return Material']) || Number(row['Qty']) || 0;
