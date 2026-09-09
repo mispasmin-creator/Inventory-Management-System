@@ -20,6 +20,28 @@ const defaultFormValues = {
 
 const numberOrZero = (value) => (value === '' || value === null || value === undefined ? 0 : Number(value) || 0);
 
+// Opening Stock Date for Trading Material — mirrors BranchInventory's INVENTORY_START_DATE so
+// live-fetched figures (Purchase Received, Purchase Return, Sales, Sales Return) only count
+// transactions on/after the date the opening stock was struck, not the full history.
+const INVENTORY_START_DATE = '2026-06-23';
+
+const getLocalDateString = (val) => {
+  if (!val) return '';
+  if (typeof val === 'string') {
+    const trimmed = val.trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
+    if (/^\d{4}\/\d{2}\/\d{2}$/.test(trimmed)) return trimmed.replace(/\//g, '-');
+    const match = trimmed.match(/^(\d{4}-\d{2}-\d{2})[ T]/);
+    if (match) return match[1];
+  }
+  const d = new Date(val);
+  if (Number.isNaN(d.getTime())) return '';
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+};
+
 // --- key normalization, mirrored from src/services/api.js so this page matches Trading
 // Material product/firm names against Purchase (LIFT-ACCOUNTS) and Order (DISPATCH /
 // Material Return) records the exact same way Raw Material and Finished Good already do. ---
@@ -46,13 +68,16 @@ const fetchPurchaseReceivedMap = async () => {
     for (let from = 0; ; from += pageSize) {
       const { data, error } = await purchaseSupabase
         .from('LIFT-ACCOUNTS')
-        .select('"Firm Name", "Raw Material Name", "Actual Quantity", "Actual 1"')
+        .select('"Firm Name", "Raw Material Name", "Actual Quantity", "Actual 1", "Date Of Receiving"')
         .not('Actual 1', 'is', null)
         .not('Actual Quantity', 'is', null)
         .range(from, from + pageSize - 1);
       if (error) throw error;
 
       (data || []).forEach((row) => {
+        const rowDate = getLocalDateString(row['Date Of Receiving'] || row['Actual 1']);
+        if (rowDate && rowDate < INVENTORY_START_DATE) return;
+
         const firmKey = normalizeFirmKey(row['Firm Name']);
         const itemKey = normalizeItemKey(row['Raw Material Name']);
         const qty = Number(row['Actual Quantity']);
@@ -84,6 +109,9 @@ const fetchPurchaseReturnMap = async () => {
       if (error) throw error;
 
       (data || []).forEach((row) => {
+        const rowDate = getLocalDateString(row['Time Stamp']);
+        if (rowDate && rowDate < INVENTORY_START_DATE) return;
+
         const firmKey = normalizeFirmKey(row['Firm Name']);
         const productKey = normalizeItemKey(row['Product Name']);
         const qty = Number(row['Return This Time']);
@@ -146,6 +174,8 @@ const fetchSalesMaps = async () => {
       (dispatchRows || []).forEach((row) => {
         const invoiceActualizedAt = String(row['Bill Date'] || row['Actual4'] || '').trim();
         if (!invoiceActualizedAt) return;
+        const rowDate = getLocalDateString(invoiceActualizedAt);
+        if (rowDate && rowDate < INVENTORY_START_DATE) return;
 
         const po = orderMap.get(String(row.po_id ?? '').trim()) || {};
         const firmKey = normalizeFirmKey(normalizeOrderFirmName(po['Firm Name']));
@@ -177,6 +207,8 @@ const fetchSalesMaps = async () => {
       (returnRows || []).forEach((row) => {
         const returnDispatchedAt = row['Return Dispatched At'] || '';
         if (!returnDispatchedAt || String(returnDispatchedAt).trim() === '') return;
+        const rowDate = getLocalDateString(returnDispatchedAt);
+        if (rowDate && rowDate < INVENTORY_START_DATE) return;
 
         const productKey = normalizeItemKey(row['Product Name']);
         const partyKey = normalizeItemKey(row['Party Name']);
