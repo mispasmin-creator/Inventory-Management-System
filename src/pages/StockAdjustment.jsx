@@ -187,6 +187,7 @@ const StockAdjustment = () => {
         .from('stock_adjustment')
         .select('id, entry_date, firm_name, item_name, qty, remark, status, material_type, created_at', { count: 'exact' })
         .not('qty', 'is', null)
+        .is('deleted_at', null)
         .order('created_at', { ascending: false });
 
       query = restrictQueryToAccessibleFirms(query);
@@ -223,6 +224,7 @@ const StockAdjustment = () => {
       const query = supabase
         .from('inventory_master')
         .select('id, firm_name, item_name, op_stock, op_stock_date, optimum_qty, max_qty, annu_con, unit, safety_factor, lead_time_days')
+        .is('deleted_at', null)
         .order('firm_name', { ascending: true })
         .order('item_name', { ascending: true });
       const { data, error } = await restrictQueryToAccessibleFirms(query);
@@ -250,6 +252,7 @@ const StockAdjustment = () => {
         const query = supabase
           .from('finished_goods_inventory_master')
           .select('id, firm_name, product_name, op_stock, op_stock_date')
+          .is('deleted_at', null)
           .order('firm_name', { ascending: true })
         .order('product_name', { ascending: true });
       const { data, error } = await restrictQueryToAccessibleFirms(query);
@@ -270,6 +273,7 @@ const StockAdjustment = () => {
       const query = supabase
         .from('trading_material_master')
         .select('id, firm_name, product_name, op_stock, op_stock_date')
+        .is('deleted_at', null)
         .order('firm_name', { ascending: true })
         .order('product_name', { ascending: true });
       const { data, error } = await restrictQueryToAccessibleFirms(query);
@@ -558,7 +562,7 @@ const StockAdjustment = () => {
 
     try {
       const table = row.material_type === 'raw_material' ? 'inventory_master' : row.material_type === 'finish_good' ? 'finished_goods_inventory_master' : 'trading_material_master';
-      const { error } = await supabase.from(table).delete().eq('id', row.id);
+      const { error } = await supabase.from(table).update({ deleted_at: new Date().toISOString() }).eq('id', row.id);
 
       if (error) throw error;
 
@@ -698,7 +702,7 @@ const StockAdjustment = () => {
     try {
       const { error } = await supabase
         .from('stock_adjustment')
-        .delete()
+        .update({ deleted_at: new Date().toISOString() })
         .eq('id', row.id);
 
       if (error) throw error;

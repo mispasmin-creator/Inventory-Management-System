@@ -556,7 +556,8 @@ const BranchInventory = () => {
     try {
       const { data, error } = await supabase
         .from('stock_adjustment')
-        .select('firm_name, item_name, qty, status, material_type, entry_date');
+        .select('firm_name, item_name, qty, status, material_type, entry_date')
+        .is('deleted_at', null);
 
       if (error) throw error;
       setRawFactoryEntries(data || []);

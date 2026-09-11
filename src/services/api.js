@@ -894,6 +894,7 @@ const buildFinishedGoodAdjustmentMap = async (selectedDate = '') => {
         .from('stock_adjustment')
         .select('firm_name, item_name, qty, status, material_type, entry_date')
         .eq('material_type', 'finish_good')
+        .is('deleted_at', null)
         .range(from, from + pageSize - 1);
 
       if (error) throw error;
@@ -956,6 +957,7 @@ const buildProductTabRateMap = async () => {
         .select('firm_name, item_name, rate')
         .eq('material_type', 'raw_material')
         .not('rate', 'is', null)
+        .is('deleted_at', null)
         .order('created_at', { ascending: false })
         .range(from, from + pageSize - 1);
 
@@ -1248,7 +1250,8 @@ export const apiService = {
         .from('login')
         .select('*')
         .eq('username', username)
-        .eq('password', password); // In production, passwords should be salted and hashed.
+        .eq('password', password) // In production, passwords should be salted and hashed.
+        .is('deleted_at', null);
       
       if (error) {
         throw error;
@@ -1300,7 +1303,8 @@ export const apiService = {
       const normalizedBranch = branch?.toLowerCase().trim();
       let query = supabase
         .from('inventory_master')
-        .select('*', { count: 'exact' });
+        .select('*', { count: 'exact' })
+        .is('deleted_at', null);
 
       if (firmFilter) {
         query = query.ilike('firm_name', `%${firmFilter}%`);
@@ -1584,7 +1588,8 @@ export const apiService = {
       const purchaseReturnMapPromise = buildFinishedGoodPurchaseReturnMap(selectedDate);
       let query = supabase
         .from('finished_goods_inventory_master')
-        .select('*', { count: 'exact' });
+        .select('*', { count: 'exact' })
+        .is('deleted_at', null);
 
       if (firmFilter) {
         query = query.ilike('firm_name', `%${firmFilter}%`);
@@ -1772,7 +1777,7 @@ export const apiService = {
     try {
       const { error } = await supabase
         .from('inventory_master')
-        .delete()
+        .update({ deleted_at: new Date().toISOString() })
         .eq('id', itemId);
 
       if (error) throw error;

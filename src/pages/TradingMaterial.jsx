@@ -243,6 +243,7 @@ const fetchStockAdjustmentMap = async () => {
         .from('stock_adjustment')
         .select('firm_name, item_name, qty, status')
         .eq('material_type', 'trading_material')
+        .is('deleted_at', null)
         .range(from, from + pageSize - 1);
       if (error) throw error;
 
@@ -296,6 +297,7 @@ const TradingMaterial = () => {
         supabase
           .from('trading_material_master')
           .select('*')
+          .is('deleted_at', null)
           .order('firm_name', { ascending: true })
           .order('product_name', { ascending: true }),
         fetchPurchaseReceivedMap(),

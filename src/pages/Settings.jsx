@@ -177,6 +177,7 @@ const Settings = () => {
       const { data, error } = await supabase
         .from('login')
         .select('id, username, password, role, firm_name, page_access, created_at')
+        .is('deleted_at', null)
         .order('created_at', { ascending: false });
       if (error) throw error;
       setUsers(data || []);
@@ -323,7 +324,7 @@ const Settings = () => {
     try {
       const { error } = await supabase
         .from('login')
-        .delete()
+        .update({ deleted_at: new Date().toISOString() })
         .eq('id', deleteTarget.id);
       if (error) throw error;
       showSuccess(`User "${deleteTarget.username}" deleted.`);
