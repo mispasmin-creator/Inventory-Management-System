@@ -73,6 +73,12 @@ const FINISH_LEGEND = [
   { label: 'Stock available', color: '#10b981' },
 ];
 
+// Current month as 'YYYY-MM', for the <input type="month"> default value.
+const getCurrentMonthValue = () => {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+};
+
 const History = () => {
   const { showError } = useToast();
   const [activeTab, setActiveTab] = useState('raw_material');
@@ -81,18 +87,28 @@ const History = () => {
   const [finishRows, setFinishRows] = useState([]);
   const [finishDates, setFinishDates] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [selectedMonth, setSelectedMonth] = useState(getCurrentMonthValue);
 
   const isFinishGood = activeTab === 'finish_good';
 
   const fetchHistory = useCallback(async () => {
     setLoading(true);
     try {
+      const [yearStr, monthStr] = selectedMonth.split('-');
+      const year = Number(yearStr);
+      const month = Number(monthStr);
+      const monthStart = `${yearStr}-${monthStr}-01`;
+      const nextMonth = new Date(year, month, 1);
+      const monthEnd = `${nextMonth.getFullYear()}-${String(nextMonth.getMonth() + 1).padStart(2, '0')}-01`;
+
       const readAll = async (table, columns, orderColumn) => {
         const rows = [];
         for (let from = 0; ; from += PAGE_SIZE) {
           const { data, error } = await supabase
             .from(table)
             .select(columns)
+            .gte('snapshot_date', monthStart)
+            .lt('snapshot_date', monthEnd)
             .order('firm_name', { ascending: true })
             .order(orderColumn, { ascending: true })
             .order('snapshot_date', { ascending: true })
@@ -159,7 +175,7 @@ const History = () => {
     } finally {
       setLoading(false);
     }
-  }, [showError]);
+  }, [showError, selectedMonth]);
 
   useEffect(() => {
     fetchHistory();
@@ -221,6 +237,17 @@ const History = () => {
               {isFinishGood ? 'Current Level' : 'Actual Level'} as captured automatically at 12 AM.
             </p>
           </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <label htmlFor="history-month" className="text-xs font-semibold text-(--ink-muted)">Month:</label>
+          <input
+            id="history-month"
+            type="month"
+            value={selectedMonth}
+            max={getCurrentMonthValue()}
+            onChange={(e) => e.target.value && setSelectedMonth(e.target.value)}
+            className="px-3 py-2 text-xs rounded-lg glass-input"
+          />
         </div>
       </div>
 
