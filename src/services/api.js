@@ -1693,6 +1693,183 @@ export const apiService = {
     }
   },
 
+  // Source records behind a Finished Good row's "Production" figure — same tables, matching
+  // and date rule as buildFinishedGoodProductionMap, so the entries add up to the column value.
+  getFinishedGoodProductionBreakdown: async (firmName, productName, selectedDate = '') => {
+    const pageSize = 1000;
+    const firmKey = normalizeFirmKey(firmName);
+    const productKey = normalizeItemKey(productName);
+    const entries = [];
+    const isCounted = (rowDate) => !selectedDate || (rowDate && rowDate >= selectedDate);
+
+    for (let from = 0; ; from += pageSize) {
+      const { data, error } = await productionSupabase
+        .from('actual_production')
+        .select('id, "FIRM Name", "Product Name", "Quantity Of FG", "Timestamp", "Date Of Production", "Job Card No."')
+        .order('id', { ascending: false })
+        .range(from, from + pageSize - 1);
+      if (error) throw error;
+
+      (data || []).forEach((row) => {
+        if (normalizeFirmKey(normalizeProductionFirmName(row['FIRM Name'])) !== firmKey) return;
+        if (normalizeItemKey(row['Product Name']) !== productKey) return;
+        const rawQuantity = row['Quantity Of FG'];
+        const quantity = Number(rawQuantity);
+        if (rawQuantity === null || rawQuantity === '' || !Number.isFinite(quantity)) return;
+
+        const rowDate = getLocalDateString(row['Date Of Production'] || row.Timestamp);
+        if (!isCounted(rowDate)) return;
+        entries.push({
+          source: 'Actual Production',
+          reference: row['Job Card No.'] || `#${row.id}`,
+          date: rowDate,
+          quantity
+        });
+      });
+
+      if (!data || data.length < pageSize) break;
+    }
+
+    for (let from = 0; ; from += pageSize) {
+      const { data, error } = await productionSupabase
+        .from('crushing_actual')
+        .select('id, "Timestamp", "Date Of Production", "Firm Name", "Finished Goods Name 1", "Qty 1", "Finished Goods Name 2", "Qty 2", "Finished Goods Name 3", "Qty 3", "Finished Goods Name 4", "Qty 4"')
+        .order('id', { ascending: false })
+        .range(from, from + pageSize - 1);
+      if (error) throw error;
+
+      (data || []).forEach((row) => {
+        if (normalizeFirmKey(normalizeProductionFirmName(row['Firm Name'])) !== firmKey) return;
+        const rowDate = getLocalDateString(row['Date Of Production'] || row.Timestamp);
+        if (!isCounted(rowDate)) return;
+
+        for (let i = 1; i <= 4; i++) {
+          const fgQtyRaw = row[`Qty ${i}`];
+          const fgQty = Number(fgQtyRaw);
+          if (normalizeItemKey(row[`Finished Goods Name ${i}`]) !== productKey) continue;
+          if (fgQtyRaw === null || fgQtyRaw === '' || !Number.isFinite(fgQty)) continue;
+          entries.push({ source: 'Crushing', reference: `#${row.id}`, date: rowDate, quantity: fgQty });
+        }
+      });
+
+      if (!data || data.length < pageSize) break;
+    }
+
+    entries.sort((a, b) => String(b.date).localeCompare(String(a.date)));
+    return { entries, total: entries.reduce((sum, entry) => sum + entry.quantity, 0) };
+  },
+
+  // Source records behind a Finished Good row's "Sales" figure — mirrors
+  // buildFinishedGoodDispatchMap (DISPATCH rows with a completed invoice, joined to ORDER RECEIPT).
+  getFinishedGoodSalesBreakdown: async (firmName, productName, selectedDate = '') => {
+    const pageSize = 1000;
+    const firmKey = normalizeFirmKey(firmName);
+    const productKey = normalizeItemKey(productName);
+    const orderMap = new Map();
+    const entries = [];
+    const normalizeJoinId = (value) => String(value ?? '').trim();
+
+    for (let from = 0; ; from += pageSize) {
+      const { data, error } = await orderSupabase
+        .from('ORDER RECEIPT')
+        .select('id, "Firm Name", "Product Name", "DO-Delivery Order No.", "Party Names"')
+        .range(from, from + pageSize - 1);
+      if (error) throw error;
+
+      (data || []).forEach((row) => {
+        const orderId = normalizeJoinId(row.id);
+        if (orderId) orderMap.set(orderId, row);
+      });
+
+      if (!data || data.length < pageSize) break;
+    }
+
+    for (let from = 0; ; from += pageSize) {
+      const { data, error } = await orderSupabase
+        .from('DISPATCH')
+        .select('id, po_id, "Product Name", "Qty To Be Dispatched", "Actual Truck Qty", "Planned4", "Actual4", "Bill Date"')
+        .not('Planned4', 'is', null)
+        .not('Actual4', 'is', null)
+        .range(from, from + pageSize - 1);
+      if (error) throw error;
+
+      (data || []).forEach((row) => {
+        const invoiceActualizedAt = String(row['Bill Date'] || row.Actual4 || '').trim();
+        if (!invoiceActualizedAt) return;
+
+        const po = orderMap.get(normalizeJoinId(row.po_id)) || {};
+        if (normalizeFirmKey(normalizeOrderFirmName(po['Firm Name'])) !== firmKey) return;
+        const dispatchProductName = String(row['Product Name'] || '').trim();
+        if (normalizeItemKey(dispatchProductName || po['Product Name']) !== productKey) return;
+
+        const actualTruckQty = Number(row['Actual Truck Qty']);
+        const plannedDispatchQty = Number(row['Qty To Be Dispatched']);
+        const validActualTruckQty = Number.isFinite(actualTruckQty) && actualTruckQty > 0 ? actualTruckQty : 0;
+        const validPlannedDispatchQty = Number.isFinite(plannedDispatchQty) && plannedDispatchQty > 0 ? plannedDispatchQty : 0;
+        const truckQty = validActualTruckQty && validPlannedDispatchQty
+          ? Math.min(validActualTruckQty, validPlannedDispatchQty)
+          : validActualTruckQty || validPlannedDispatchQty;
+
+        const rowDate = getLocalDateString(invoiceActualizedAt);
+        if (selectedDate && !(rowDate && rowDate >= selectedDate)) return;
+
+        const doNumber = po['DO-Delivery Order No.'];
+        const party = po['Party Names'];
+        entries.push({
+          source: 'Dispatch',
+          reference: [doNumber, party].filter(Boolean).join(' · ') || `#${row.id}`,
+          date: rowDate,
+          quantity: truckQty
+        });
+      });
+
+      if (!data || data.length < pageSize) break;
+    }
+
+    entries.sort((a, b) => String(b.date).localeCompare(String(a.date)));
+    return { entries, total: entries.reduce((sum, entry) => sum + entry.quantity, 0) };
+  },
+
+  // Source records behind a Finished Good row's "Purchase Material Received" figure —
+  // mirrors buildFinishedGoodPurchaseMap (LIFT-ACCOUNTS "Actual Quantity").
+  getFinishedGoodPurchaseBreakdown: async (firmName, productName, selectedDate = '') => {
+    const pageSize = 1000;
+    const firmKey = normalizeFirmKey(firmName);
+    const productKey = normalizeItemKey(productName);
+    const entries = [];
+
+    for (let from = 0; ; from += pageSize) {
+      const { data, error } = await purchaseSupabase
+        .from('LIFT-ACCOUNTS')
+        .select('id, "Lift No", "Firm Name", "Raw Material Name", "Actual Quantity", "Date Of Receiving", "Timestamp"')
+        .order('id', { ascending: false })
+        .range(from, from + pageSize - 1);
+      if (error) throw error;
+
+      (data || []).forEach((row) => {
+        if (normalizeFirmKey(row['Firm Name']) !== firmKey) return;
+        if (normalizeItemKey(row['Raw Material Name']) !== productKey) return;
+        const rawQuantity = row['Actual Quantity'];
+        const quantity = Number(rawQuantity);
+        if (rawQuantity === null || rawQuantity === '' || !Number.isFinite(quantity)) return;
+
+        const rowDate = getLocalDateString(row['Date Of Receiving'] || row['Timestamp']);
+        if (selectedDate && !(rowDate && rowDate >= selectedDate)) return;
+        entries.push({
+          source: 'Purchase Receipt',
+          reference: row['Lift No'] || `#${row.id}`,
+          date: rowDate,
+          quantity
+        });
+      });
+
+      if (!data || data.length < pageSize) break;
+    }
+
+    entries.sort((a, b) => String(b.date).localeCompare(String(a.date)));
+    return { entries, total: entries.reduce((sum, entry) => sum + entry.quantity, 0) };
+  },
+
   addInventory: async (branch, item) => {
     try {
       const getFirmName = (bName) => {

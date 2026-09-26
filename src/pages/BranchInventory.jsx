@@ -313,7 +313,9 @@ const BranchInventory = () => {
   const [rateBreakdownItem, setRateBreakdownItem] = useState(null);
   const [purchaseBreakdownModalOpen, setPurchaseBreakdownModalOpen] = useState(false);
   const [purchaseBreakdownItem, setPurchaseBreakdownItem] = useState(null);
-  
+  // Finished Good drill-down: which source records make up a Production / Purchase figure.
+  const [fgBreakdown, setFgBreakdown] = useState(null); // { kind, item, loading, entries, total }
+
   // Transfers logs
   const [transferRequests, setTransferRequests] = useState([]);
   const [transfersLoading, setTransfersLoading] = useState(false);
@@ -694,6 +696,32 @@ const BranchInventory = () => {
     }
   };
 
+  const openFgBreakdown = async (kind, row) => {
+    setFgBreakdown({ kind, item: row, loading: true, entries: [], total: 0 });
+    try {
+      const fetcher = {
+        production: apiService.getFinishedGoodProductionBreakdown,
+        purchase: apiService.getFinishedGoodPurchaseBreakdown,
+        sales: apiService.getFinishedGoodSalesBreakdown
+      }[kind];
+      const { entries, total } = await fetcher(row.firm_name, row.product_name, selectedDate);
+      setFgBreakdown({ kind, item: row, loading: false, entries, total });
+    } catch (e) {
+      showError(e.message || 'Failed to load breakdown.');
+      setFgBreakdown(null);
+    }
+  };
+
+  const renderFgBreakdownCell = (kind, row, value) => (
+    <button
+      onClick={() => openFgBreakdown(kind, row)}
+      className="w-full text-center font-semibold cursor-pointer hover:opacity-80 transition-opacity underline-offset-2 hover:underline"
+      title="Click to see where this quantity comes from"
+    >
+      {renderFinishGoodNumber(value)}
+    </button>
+  );
+
   const finishGoodColumns = [
     { header: 'S.N.', accessor: '_sn', render: (row, rowIndex) => rowIndex + 1 },
     { header: 'Firm Name', accessor: 'firm_name' },
@@ -705,7 +733,7 @@ const BranchInventory = () => {
       header: 'Purchase Material Received', 
       accessor: 'purchase_material_received', 
       cellClassName: (row) => getTintedCellClass(row.purchase_material_received, 'emerald'),
-      render: (row) => renderFinishGoodNumber(row.purchase_material_received)
+      render: (row) => renderFgBreakdownCell('purchase', row, row.purchase_material_received)
     },
     { 
       header: 'Purchase Return', 
@@ -717,13 +745,13 @@ const BranchInventory = () => {
       header: 'Production', 
       accessor: 'production', 
       cellClassName: (row) => getTintedCellClass(row.production, 'emerald'),
-      render: (row) => renderFinishGoodNumber(row.production)
+      render: (row) => renderFgBreakdownCell('production', row, row.production)
     },
     { 
       header: 'Sales', 
       accessor: 'sales', 
       cellClassName: (row) => getTintedCellClass(row.sales, 'rose'),
-      render: (row) => renderFinishGoodNumber(row.sales)
+      render: (row) => renderFgBreakdownCell('sales', row, row.sales)
     },
     { 
       header: 'Sales Return', 
@@ -2079,6 +2107,85 @@ const BranchInventory = () => {
                 setPurchaseBreakdownModalOpen(false);
                 setPurchaseBreakdownItem(null);
               }}
+              className="px-4 py-2.5 rounded-lg bg-emerald-700 text-white text-xs font-semibold hover:bg-emerald-600 cursor-pointer transition-colors"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        isOpen={!!fgBreakdown}
+        onClose={() => setFgBreakdown(null)}
+        title={`${{ production: 'Production', purchase: 'Purchase Material Received', sales: 'Sales' }[fgBreakdown?.kind] || ''}: ${fgBreakdown?.item?.product_name || ''}`}
+      >
+        <div className="space-y-4 text-slate-300">
+          <div className="flex items-center justify-between gap-4 px-4 py-3 rounded-xl bg-slate-900/60 border border-slate-800 backdrop-blur-md">
+            <div>
+              <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Product</div>
+              <div className="text-sm font-bold text-slate-100 mt-0.5">{fgBreakdown?.item?.product_name || '-'}</div>
+            </div>
+            <div>
+              <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Firm</div>
+              <div className="text-sm font-bold text-slate-100 mt-0.5">{fgBreakdown?.item?.firm_name || '-'}</div>
+            </div>
+            <div className="text-right">
+              <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">From</div>
+              <div className="text-sm font-bold text-slate-100 mt-0.5">{selectedDate || 'All dates'}</div>
+            </div>
+          </div>
+
+          {fgBreakdown?.loading ? (
+            <div className="text-center py-8 text-xs text-slate-400">Loading...</div>
+          ) : (
+            <div className="overflow-auto max-h-[50vh] rounded-xl border border-slate-800 bg-slate-900/30 backdrop-blur-md">
+              <table className="w-full border-collapse text-center text-xs text-slate-300 min-w-[420px]">
+                <thead className="bg-slate-900 uppercase tracking-wider text-slate-400 border-b border-slate-800 sticky top-0 z-10">
+                  <tr>
+                    <th className="px-4 py-2.5 font-semibold text-slate-400">Date</th>
+                    <th className="px-4 py-2.5 font-semibold text-slate-400">Source</th>
+                    <th className="px-4 py-2.5 font-semibold text-slate-400">{{ production: 'Job Card', purchase: 'Lift No', sales: 'DO No. / Party' }[fgBreakdown?.kind]}</th>
+                    <th className="px-4 py-2.5 font-semibold text-emerald-400">Quantity</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/60">
+                  {(fgBreakdown?.entries || []).length === 0 ? (
+                    <tr>
+                      <td colSpan={4} className="px-4 py-6 text-slate-500">No records found.</td>
+                    </tr>
+                  ) : (
+                    fgBreakdown.entries.map((entry, index) => (
+                      <tr key={`${entry.source}-${entry.reference}-${index}`} className="hover:bg-slate-800/10 transition-colors duration-150">
+                        <td className="px-4 py-2 whitespace-nowrap">{entry.date || '-'}</td>
+                        <td className="px-4 py-2 whitespace-nowrap text-slate-400">{entry.source}</td>
+                        <td className="px-4 py-2 whitespace-nowrap">{entry.reference}</td>
+                        <td className="px-4 py-2 font-semibold text-emerald-400 whitespace-nowrap">
+                          {entry.quantity.toLocaleString(undefined, { maximumFractionDigits: 3 })}
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {!fgBreakdown?.loading && (
+            <div className="flex items-center justify-between px-5 py-3.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-md">
+              <div className="text-xs font-bold uppercase tracking-wider">
+                Total {{ production: 'Production', purchase: 'Purchase Received', sales: 'Sales' }[fgBreakdown?.kind]}
+                <span className="ml-2 font-medium normal-case opacity-90">({(fgBreakdown?.entries || []).length} entries)</span>
+              </div>
+              <div className="text-xl font-black tracking-wide">
+                {(fgBreakdown?.total || 0).toLocaleString(undefined, { maximumFractionDigits: 3 })}
+              </div>
+            </div>
+          )}
+
+          <div className="pt-2 border-t border-slate-800 flex justify-end">
+            <button
+              onClick={() => setFgBreakdown(null)}
               className="px-4 py-2.5 rounded-lg bg-emerald-700 text-white text-xs font-semibold hover:bg-emerald-600 cursor-pointer transition-colors"
             >
               Close
