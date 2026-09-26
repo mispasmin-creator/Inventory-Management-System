@@ -362,7 +362,7 @@ const buildProductTabRateMap = async (): Promise<Record<string, number>> => {
     db().inventoryDb,
     'stock_adjustment',
     'firm_name, item_name, rate, created_at',
-    (q) => q.eq('material_type', 'raw_material').not('rate', 'is', null).order('created_at', { ascending: false }),
+    (q) => q.eq('material_type', 'raw_material').not('rate', 'is', null).is('deleted_at', null).order('created_at', { ascending: false }),
   );
   rows.forEach((row) => {
     const firmKey = normalizeFirmKey(row.firm_name);
@@ -406,7 +406,9 @@ const buildLiftDataMaps = async (selectedDate: string) => {
     // looks at the single most-recent receipt regardless of selectedDate — same as api.js.
     const actualQuantity = Number(row['Actual Quantity']);
     if (isInSelectedPeriod && Number.isFinite(actualQuantity)) {
-      actualQuantityMap[key] = (actualQuantityMap[key] || 0) + actualQuantity;
+      // Light Diesel Oil is purchased in MT; converted to Ltr (x1000) like api.js.
+      actualQuantityMap[key] = (actualQuantityMap[key] || 0)
+        + (RATE_DIVIDE_BY_1000_ITEM_KEYS.has(itemKey) ? actualQuantity * 1000 : actualQuantity);
     }
 
     // Product Rate: take the Rate from the LIFT-ACCOUNTS record with the latest Date Of
@@ -709,25 +711,41 @@ const buildFinishedGoodPurchaseMap = async (selectedDate: string) => {
 
 const buildFinishedGoodReturnMap = async (selectedDate: string) => {
   const returnMap: Record<string, Bucket> = {};
-  const firmByDoNumber: Record<string, unknown> = {};
+  const ordersByDoNumber: Record<string, { firm: unknown; productKey: string; partyKey: string }[]> = {};
 
-  const orders = await fetchAll(db().orderDb, 'ORDER RECEIPT', '"DO-Delivery Order No.", "Firm Name"');
+  const orders = await fetchAll(
+    db().orderDb,
+    'ORDER RECEIPT',
+    '"DO-Delivery Order No.", "Firm Name", "Product Name", "Party Names"',
+  );
   orders.forEach((row) => {
     const doNumber = row['DO-Delivery Order No.'];
-    if (doNumber) firmByDoNumber[doNumber] = row['Firm Name'];
+    if (!doNumber) return;
+    (ordersByDoNumber[doNumber] ||= []).push({
+      firm: row['Firm Name'],
+      productKey: normalizeItemKey(row['Product Name']),
+      partyKey: normalizeItemKey(row['Party Names']),
+    });
   });
 
   const returns = await fetchAll(
     db().orderDb,
     'Material Return',
-    'id, "D.O Number", "Product Name", "Qty Of Return Material", "Qty", "Return Dispatched At", "Actual5", "Debit Note Issued At"',
+    'id, "D.O Number", "Party Name", "Product Name", "Qty Of Return Material", "Qty", "Return Dispatched At", "Actual5", "Debit Note Issued At"',
     (q) => q.not('Actual5', 'is', null).not('Debit Note Issued At', 'is', null),
   );
   returns.forEach((row) => {
     const returnDispatchedAt = row['Return Dispatched At'] || '';
     if (!returnDispatchedAt || String(returnDispatchedAt).trim() === '') return;
-    const firmKey = normalizeFirmKey(normalizeOrderFirmName(firmByDoNumber[row['D.O Number']]));
     const productKey = normalizeItemKey(row['Product Name']);
+    const partyKey = normalizeItemKey(row['Party Name']);
+    const candidates = ordersByDoNumber[row['D.O Number']] || [];
+    // Same DO number can be reused across firms, so disambiguate by product + party (mirrors api.js).
+    const matchedOrder =
+      candidates.find((c) => c.productKey === productKey && c.partyKey === partyKey) ||
+      candidates.find((c) => c.productKey === productKey) ||
+      (candidates.length === 1 ? candidates[0] : null);
+    const firmKey = normalizeFirmKey(normalizeOrderFirmName(matchedOrder?.firm));
     if (!firmKey || !productKey) return;
     const returnQty = Number(row['Qty Of Return Material']) || Number(row['Qty']) || 0;
     addToBucket(returnMap, `${firmKey}::${productKey}`, returnQty, getLocalDateString(returnDispatchedAt), selectedDate);
@@ -742,7 +760,7 @@ const buildFinishedGoodAdjustmentMap = async (selectedDate: string) => {
     db().inventoryDb,
     'stock_adjustment',
     'firm_name, item_name, qty, status, material_type, entry_date',
-    (q) => q.eq('material_type', 'finish_good'),
+    (q) => q.eq('material_type', 'finish_good').is('deleted_at', null),
   );
   rows.forEach((row) => {
     const firmKey = normalizeFirmKey(row.firm_name);
@@ -758,15 +776,26 @@ const buildFinishedGoodAdjustmentMap = async (selectedDate: string) => {
 // --- snapshot builders -----------------------------------------------------
 
 const snapshotRawMaterial = async (snapshotDate: string, selectedDate: string) => {
-  const [masters, lift, salesRawOrders, adjustmentRows] = await Promise.all([
+  const [masters, lift, salesRawOrders, adjustmentRows, purchaseReturnMap] = await Promise.all([
     // inventory_master has no product_rate column of its own — the fallback below
     // (item.product_rate ?? '') is therefore always '' in practice, same as api.js.
-    fetchAll(db().inventoryDb, 'inventory_master', 'id, firm_name, item_name, unit, op_stock, optimum_qty, max_qty'),
+    fetchAll(
+      db().inventoryDb,
+      'inventory_master',
+      'id, firm_name, item_name, unit, op_stock, optimum_qty, max_qty',
+      (q) => q.is('deleted_at', null),
+    ),
     buildLiftDataMaps(selectedDate),
     // Left as * — api.js falls back across completed_at/updated_at/created_at/
     // order_date/date, and naming them would break if a column is absent.
     fetchAll(db().salesRawDb, 'orders', '*', (q) => q.eq('status', 'Completed')),
-    fetchAll(db().inventoryDb, 'stock_adjustment', 'firm_name, item_name, qty, status, material_type, entry_date'),
+    fetchAll(
+      db().inventoryDb,
+      'stock_adjustment',
+      'firm_name, item_name, qty, status, material_type, entry_date',
+      (q) => q.is('deleted_at', null),
+    ),
+    buildFinishedGoodPurchaseReturnMap(selectedDate),
   ]);
 
   const salesRawQtyMap: Record<string, number> = {};
@@ -807,8 +836,12 @@ const snapshotRawMaterial = async (snapshotDate: string, selectedDate: string) =
     const rawActual = lift.actualQuantityMap[key] as number | undefined;
     let actualLevel: number | '' = rawActual ?? '';
     const salesRawQty = salesRawQtyMap[key] || 0;
-    if (actualLevel !== '' || salesRawQty !== 0 || opStock !== 0) {
-      actualLevel = opStock + Number(actualLevel || 0) - salesRawQty;
+    // Purchase Return is netted off across ALL records (not date-restricted), in Ltr for
+    // MT-purchased items — same as api.js.
+    const purchaseReturnQty = purchaseReturnMap[key]?.total || 0;
+    const purchaseReturnDisplayQty = RATE_DIVIDE_BY_1000_ITEM_KEYS.has(itemKey) ? purchaseReturnQty * 1000 : purchaseReturnQty;
+    if (actualLevel !== '' || salesRawQty !== 0 || opStock !== 0 || purchaseReturnDisplayQty !== 0) {
+      actualLevel = opStock + Number(actualLevel || 0) - salesRawQty - purchaseReturnDisplayQty;
     }
 
     const plainFirm = item.firm_name?.trim().toLowerCase();
@@ -977,7 +1010,12 @@ const buildFinishedGoodPendingOrderMap = async () => {
 const snapshotFinishedGoods = async (snapshotDate: string, selectedDate: string) => {
   const [masters, productionMap, dispatchMap, pendingOrderMap, purchaseMap, returnMap, adjustmentMap, consumptionMap, purchaseReturnMap] =
     await Promise.all([
-      fetchAll(db().inventoryDb, 'finished_goods_inventory_master', 'id, firm_name, product_name, op_stock'),
+      fetchAll(
+        db().inventoryDb,
+        'finished_goods_inventory_master',
+        'id, firm_name, product_name, op_stock',
+        (q) => q.is('deleted_at', null),
+      ),
       buildFinishedGoodProductionMap(selectedDate),
       buildFinishedGoodDispatchMap(selectedDate),
       buildFinishedGoodPendingOrderMap(),
