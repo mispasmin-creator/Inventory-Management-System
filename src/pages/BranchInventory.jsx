@@ -518,7 +518,7 @@ const BranchInventory = () => {
 
       const { data: actualData, error: actualError } = await productionSupabase
         .from('semi_actual')
-        .select('"Product Name", "Semi Finished Production No.", "Processing Cost"')
+        .select('"Product Name", "Semi Finished Production No.", "Processing Cost", firm_name')
         .order('id', { ascending: false });
       if (actualError) throw actualError;
 
@@ -537,11 +537,13 @@ const BranchInventory = () => {
       const map = {};
       Object.keys(sfByFirmAndProduct).forEach(key => {
         const sfNumbers = sfByFirmAndProduct[key];
-        const [_, productName] = key.split('::');
-        
-        const latestActual = actualData?.find(a => 
-          (a['Product Name'] || '').trim().toLowerCase() === productName && 
-          sfNumbers.has(a['Semi Finished Production No.'])
+        const [firmName, productName] = key.split('::');
+
+        // SF numbers are reused across firms, so an entry stamped with another firm is not this firm's.
+        const latestActual = actualData?.find(a =>
+          (a['Product Name'] || '').trim().toLowerCase() === productName &&
+          sfNumbers.has(a['Semi Finished Production No.']) &&
+          (!(a.firm_name || '').trim() || a.firm_name.trim().toLowerCase() === firmName)
         );
         
         if (latestActual && latestActual['Processing Cost']) {

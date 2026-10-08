@@ -233,9 +233,39 @@ const buildProductionUsageMap = async (selectedDate = '') => {
   return { usageMap, annualUsageMap };
 };
 
+const toTimeValue = (value) => {
+  const time = value ? new Date(value).getTime() : NaN;
+  return Number.isFinite(time) ? time : null;
+};
+
+// semi_production "SF-Sr No." is reused across firms, so one "SF-xx + product" key can belong
+// to several semi_production rows. Every candidate is kept and one is picked per semi_actual
+// entry (the latest created at or before it), instead of the newest row overwriting the rest.
+const addSemiProductionFirmCandidate = (candidateMap, row) => {
+  const firm = row['Firm name'];
+  if (!row['SF-Sr No.'] || isBlankValue(firm)) return;
+  const key = `${row['SF-Sr No.']}::${normalizeItemKey(row['Name Of Semi Finished Good'])}`;
+  if (!candidateMap.has(key)) candidateMap.set(key, []);
+  candidateMap.get(key).push({ firm, time: toTimeValue(row.Timestamp) ?? -Infinity, id: Number(row.id) || 0 });
+};
+
+const resolveSemiProductionFirm = (candidateMap, productionKey, entryTimestamp) => {
+  const candidates = candidateMap.get(productionKey);
+  if (!candidates) return undefined;
+  if (candidates.length === 1) return candidates[0].firm;
+
+  const entryTime = toTimeValue(entryTimestamp) ?? Infinity;
+  const ordered = [...candidates].sort((a, b) => (a.time < b.time ? -1 : a.time > b.time ? 1 : a.id - b.id));
+  let match = ordered[0];
+  ordered.forEach((candidate) => {
+    if (candidate.time <= entryTime) match = candidate;
+  });
+  return match.firm;
+};
+
 const buildSemiFinishedActualLevelMap = async (selectedDate = '') => {
   const pageSize = 1000;
-  const productionFirmMap = new Map();
+  const productionFirmCandidates = new Map();
   const semiAdjustmentMap = {};
   const semiGrainsMap = {};
   const semiFinesMap = {};
@@ -248,17 +278,12 @@ const buildSemiFinishedActualLevelMap = async (selectedDate = '') => {
     for (let from = 0; ; from += pageSize) {
       const { data, error } = await productionSupabase
         .from('semi_production')
-        .select('id, "SF-Sr No.", "Name Of Semi Finished Good", "Firm name"')
+        .select('id, "SF-Sr No.", "Name Of Semi Finished Good", "Firm name", "Timestamp"')
         .range(from, from + pageSize - 1);
 
       if (error) throw error;
 
-      (data || []).forEach((row) => {
-        if (row['SF-Sr No.']) {
-          const productionKey = `${row['SF-Sr No.']}::${normalizeItemKey(row['Name Of Semi Finished Good'])}`;
-          productionFirmMap.set(productionKey, row['Firm name']);
-        }
-      });
+      (data || []).forEach((row) => addSemiProductionFirmCandidate(productionFirmCandidates, row));
 
       if (!data || data.length < pageSize) break;
     }
@@ -282,7 +307,11 @@ const buildSemiFinishedActualLevelMap = async (selectedDate = '') => {
         const productName = row['Product Name'];
         const productKey = normalizeItemKey(productName);
         const productionKey = `${row['Semi Finished Production No.']}::${productKey}`;
-        const firmKey = normalizeFirmKey(normalizeProductionFirmName(productionFirmMap.get(productionKey)));
+        // semi_actual.firm_name (filled when the entry is created) wins; older rows fall back to matching by date.
+        const entryFirm = isBlankValue(row.firm_name)
+          ? resolveSemiProductionFirm(productionFirmCandidates, productionKey, row.Timestamp)
+          : row.firm_name;
+        const firmKey = normalizeFirmKey(normalizeProductionFirmName(entryFirm));
         const rawQuantity = row['Qty Of Semi Finished Good'];
         const quantity = Number(rawQuantity);
         if (!firmKey || rawQuantity === null || rawQuantity === '' || !Number.isFinite(quantity)) return;

@@ -216,26 +216,56 @@ const buildProductionUsageMap = async (selectedDate: string) => {
   return usageMap;
 };
 
+const toTimeValue = (value: unknown): number | null => {
+  const time = value ? new Date(value as string).getTime() : NaN;
+  return Number.isFinite(time) ? time : null;
+};
+
+type FirmCandidate = { firm: unknown; time: number; id: number };
+
+// semi_production "SF-Sr No." is reused across firms, so one "SF-xx + product" key can belong
+// to several semi_production rows. Every candidate is kept and one is picked per semi_actual
+// entry (the latest created at or before it), instead of the newest row overwriting the rest.
+// Mirrors api.js.
+const addSemiProductionFirmCandidate = (candidateMap: Map<string, FirmCandidate[]>, row: Row) => {
+  const firm = row['Firm name'];
+  if (!row['SF-Sr No.'] || isBlankValue(firm)) return;
+  const key = `${row['SF-Sr No.']}::${normalizeItemKey(row['Name Of Semi Finished Good'])}`;
+  if (!candidateMap.has(key)) candidateMap.set(key, []);
+  candidateMap.get(key)!.push({ firm, time: toTimeValue(row.Timestamp) ?? -Infinity, id: Number(row.id) || 0 });
+};
+
+const resolveSemiProductionFirm = (
+  candidateMap: Map<string, FirmCandidate[]>,
+  productionKey: string,
+  entryTimestamp: unknown,
+): unknown => {
+  const candidates = candidateMap.get(productionKey);
+  if (!candidates) return undefined;
+  if (candidates.length === 1) return candidates[0].firm;
+
+  const entryTime = toTimeValue(entryTimestamp) ?? Infinity;
+  const ordered = [...candidates].sort((a, b) => (a.time < b.time ? -1 : a.time > b.time ? 1 : a.id - b.id));
+  let match = ordered[0];
+  ordered.forEach((candidate) => {
+    if (candidate.time <= entryTime) match = candidate;
+  });
+  return match.firm;
+};
+
 const buildSemiFinishedActualLevelMap = async (selectedDate: string) => {
   const semiAdjustmentMap: Record<string, number> = {};
   const semiRawConsumptionMap: Record<string, number> = {};
   const latestSemiComponentsMap: Record<string, { components: { rmKey: string; qty: number }[]; processingCost: number }> = {};
   const semiProcessingCostMap: Record<string, number> = {};
-  const productionFirmMap = new Map<string, unknown>();
+  const productionFirmCandidates = new Map<string, FirmCandidate[]>();
 
   const semiProduction = await fetchAll(
     db().productionDb,
     'semi_production',
-    'id, "SF-Sr No.", "Name Of Semi Finished Good", "Firm name"',
+    'id, "SF-Sr No.", "Name Of Semi Finished Good", "Firm name", "Timestamp"',
   );
-  semiProduction.forEach((row) => {
-    if (row['SF-Sr No.']) {
-      productionFirmMap.set(
-        `${row['SF-Sr No.']}::${normalizeItemKey(row['Name Of Semi Finished Good'])}`,
-        row['Firm name'],
-      );
-    }
-  });
+  semiProduction.forEach((row) => addSemiProductionFirmCandidate(productionFirmCandidates, row));
 
   // Ordered newest-first so latestSemiComponentsMap below picks up each product's
   // most recent component list — mirrors api.js's buildSemiFinishedActualLevelMap.
@@ -254,9 +284,11 @@ const buildSemiFinishedActualLevelMap = async (selectedDate: string) => {
 
     const productName = row['Product Name'];
     const productKey = normalizeItemKey(productName);
-    const firmKey = normalizeFirmKey(
-      normalizeProductionFirmName(productionFirmMap.get(`${row['Semi Finished Production No.']}::${productKey}`)),
-    );
+    // semi_actual.firm_name (filled when the entry is created) wins; older rows fall back to matching by date.
+    const entryFirm = isBlankValue(row.firm_name)
+      ? resolveSemiProductionFirm(productionFirmCandidates, `${row['Semi Finished Production No.']}::${productKey}`, row.Timestamp)
+      : row.firm_name;
+    const firmKey = normalizeFirmKey(normalizeProductionFirmName(entryFirm));
     const rawQuantity = row['Qty Of Semi Finished Good'];
     const quantity = Number(rawQuantity);
     if (!firmKey || rawQuantity === null || rawQuantity === '' || !Number.isFinite(quantity)) return;
