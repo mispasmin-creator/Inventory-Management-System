@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { Navigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { apiService } from '../services/api';
 import GlassCard from '../components/GlassCard';
@@ -44,7 +45,9 @@ import {
 } from 'recharts';
 
 const Dashboard = () => {
-  const { user } = useAuth();
+  const { user, canAccessPage, getFirstAccessibleRoute } = useAuth();
+  const hasAccess = user?.role === 'Admin' || (canAccessPage ? canAccessPage('Dashboard') : true);
+  const alternateRoute = !hasAccess && getFirstAccessibleRoute ? getFirstAccessibleRoute() : null;
 
   const getFontSizeClass = (value) => {
     const str = String(value);
@@ -371,8 +374,9 @@ const Dashboard = () => {
   };
 
   useEffect(() => {
+    if (!user || !hasAccess) return;
     fetchDashboardData();
-  }, [user]);
+  }, [user, hasAccess]);
 
   // Premium color palettes matching CSS (declared below)
 
@@ -559,6 +563,17 @@ const Dashboard = () => {
     acc.returns += p.returns || 0;
     return acc;
   }, { purchase: 0, production: 0, sales: 0, returns: 0 });
+
+  if (!hasAccess) {
+    if (alternateRoute && alternateRoute !== '/') {
+      return <Navigate to={alternateRoute} replace />;
+    }
+    return (
+      <div className="py-12 text-center text-sm text-slate-400">
+        You do not have access to the Dashboard.
+      </div>
+    );
+  }
 
   if (loading) {
     return (

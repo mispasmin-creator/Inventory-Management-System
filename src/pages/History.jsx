@@ -4,6 +4,7 @@ import GlassCard from '../components/GlassCard';
 import Table from '../components/Table';
 import { TableSkeleton } from '../components/Skeleton';
 import { useToast } from '../components/Toast';
+import { useAuth } from '../hooks/useAuth';
 import { supabase } from '../services/supabaseClient';
 
 const branchOptions = ['Purab', 'Pmmpl', 'Rkl'];
@@ -81,6 +82,9 @@ const getCurrentMonthValue = () => {
 
 const History = () => {
   const { showError } = useToast();
+  const { user, canAccessPage } = useAuth();
+  const hasAccess = user?.role === 'Admin' || (canAccessPage ? canAccessPage('History') : true);
+
   const [activeTab, setActiveTab] = useState('raw_material');
   const [rawRows, setRawRows] = useState([]);
   const [rawDates, setRawDates] = useState([]);
@@ -178,8 +182,9 @@ const History = () => {
   }, [showError, selectedMonth]);
 
   useEffect(() => {
+    if (!user || !hasAccess) return;
     fetchHistory();
-  }, [fetchHistory]);
+  }, [user, hasAccess, fetchHistory]);
 
   const activeDates = isFinishGood ? finishDates : rawDates;
 
@@ -225,6 +230,14 @@ const History = () => {
 
   const activeRows = isFinishGood ? finishRows : rawRows;
   const hasHistory = activeDates.length > 0;
+
+  if (!hasAccess) {
+    return (
+      <div className="py-12 text-center text-sm text-slate-400">
+        You do not have access to Stock History.
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-5">

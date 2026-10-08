@@ -18,6 +18,7 @@ const normalizeFirmName = (value) => value === 'Madhya' ? 'Pmmpl' : value;
 const STOCK_ADJUSTMENT_TAB_KEYS = {
   adjustments: 'StockAdjustmentTab_Adjustments',
   op_stock: 'StockAdjustmentTab_OpStock',
+  add_product: 'StockAdjustmentTab_Products',
 };
 
 const defaultFormValues = {
@@ -31,7 +32,7 @@ const defaultFormValues = {
 
 const StockAdjustment = () => {
   const { showSuccess, showError } = useToast();
-  const { user } = useAuth();
+  const { user, canAccessBranch } = useAuth();
   const [activeTab, setActiveTab] = useState('adjustments');
   const [rawEntries, setRawEntries] = useState([]);
   const [rawItemOptions, setRawItemOptions] = useState([]);
@@ -67,24 +68,14 @@ const StockAdjustment = () => {
 
   const accessibleFirms = useMemo(() => {
     if (user?.role === 'Admin') return branchOptions;
-    const assignedFirms = user?.branch === 'All'
-      ? branchOptions
-      : (Array.isArray(user?.branch) ? user.branch : [user?.branch]);
-    const firmsFromLogin = branchOptions.filter(firmName => assignedFirms
-      .map(normalizeFirmName)
-      .includes(firmName));
-    const pageAccess = user?.page_access || [];
-    const granularStockAccess = pageAccess
-      .filter(key => key.startsWith('StockAdjustment_'))
-      .map(key => normalizeFirmName(key.replace('StockAdjustment_', '')));
+    return branchOptions.filter(branch => canAccessBranch(branch, 'stock_adjustment'));
+  }, [user, canAccessBranch]);
 
-    if (granularStockAccess.length === 0) return firmsFromLogin;
-    return firmsFromLogin.filter(firmName => granularStockAccess.includes(firmName));
-  }, [user]);
+  const hasAccess = user?.role === 'Admin' || accessibleFirms.length > 0;
 
   const visibleTabs = useMemo(() => {
     const allTabs = Object.keys(STOCK_ADJUSTMENT_TAB_KEYS);
-    if (user?.role === 'Admin') return [...allTabs, 'add_product'];
+    if (user?.role === 'Admin') return allTabs;
 
     const pageAccess = user?.page_access || [];
     const hasAnyTabPermissionConfigured = Object.values(STOCK_ADJUSTMENT_TAB_KEYS)
@@ -162,16 +153,16 @@ const StockAdjustment = () => {
   const selectedNewProductType = watchNewProduct('materialType');
 
   useEffect(() => {
-    if (!user) return;
+    if (!user || !hasAccess) return;
     fetchRawMaterialItems();
     fetchFinishGoodItems();
     fetchTradingMaterialItems();
-  }, [user]);
+  }, [user, hasAccess]);
 
   useEffect(() => {
-    if (!user) return;
+    if (!user || !hasAccess) return;
     fetchStockAdjustments();
-  }, [user, currentPage, pageSize, debouncedSearchQuery, firmFilter, accessibleFirms]);
+  }, [user, hasAccess, currentPage, pageSize, debouncedSearchQuery, firmFilter, accessibleFirms]);
 
   const restrictQueryToAccessibleFirms = (query) => {
     const databaseFirms = accessibleFirms.flatMap(firmName =>
@@ -963,6 +954,14 @@ const StockAdjustment = () => {
       </div>
     </form>
   );
+
+  if (!loading && !hasAccess) {
+    return (
+      <div className="py-12 text-center text-sm text-slate-400">
+        You do not have access to Stock Adjustment.
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6 w-full p-1.5 animate-slide-up">

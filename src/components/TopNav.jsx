@@ -31,6 +31,8 @@ const TopNav = () => {
         ? "FinishGood"
         : type === "trading_material"
         ? "TradingMaterial"
+        : type === "stock_adjustment"
+        ? "StockAdjustment"
         : "RawMaterial";
     const bName = normalizeBranch(branchName.replace(" Branch", ""));
     const legacyBName = bName === "Pmmpl" ? "Madhya" : bName;
@@ -38,6 +40,7 @@ const TopNav = () => {
     const legacySpecificKey = `${prefix}_${legacyBName}`;
     if (pageAccess.includes(specificKey) || pageAccess.includes(legacySpecificKey)) return true;
     if (type === "trading_material" && pageAccess.includes("TradingMaterial")) return true;
+    if (type === "stock_adjustment" && pageAccess.includes("StockAdjustment")) return true;
     if (pageAccess.length > 0) return false;
     if (user.branch === "All") return true;
     if (Array.isArray(user.branch)) {
@@ -49,32 +52,7 @@ const TopNav = () => {
   const accessibleBranches = branches.filter((b) => hasBranchAccess(b.name, "raw_material"));
   const accessibleFinishGoodBranches = branches.filter((b) => hasBranchAccess(b.name, "finish_good"));
   const accessibleTradingMaterialBranches = branches.filter((b) => hasBranchAccess(b.name, "trading_material"));
-  const accessibleStockAdjustmentBranches = branches.filter((branch) => {
-    if (!user) return false;
-    if (user.role === "Admin") return true;
-
-    const branchName = branch.name.replace(" Branch", "");
-    const pageAccess = user.page_access || [];
-    const normalizedBranch = branchName === "Madhya" ? "Pmmpl" : branchName;
-    const legacyBranch = normalizedBranch === "Pmmpl" ? "Madhya" : normalizedBranch;
-    const hasGranularAccess = pageAccess.some(key => key.startsWith("StockAdjustment_"));
-    const assignedBranches = user.branch === "All"
-      ? branches.map(item => item.name.replace(" Branch", ""))
-      : (Array.isArray(user.branch) ? user.branch : [user.branch]);
-    const hasAssignedBranch = assignedBranches.some(assigned =>
-      (assigned === "Madhya" ? "Pmmpl" : assigned) === normalizedBranch
-    );
-
-    if (hasGranularAccess) {
-      return hasAssignedBranch && (
-        pageAccess.includes(`StockAdjustment_${normalizedBranch}`)
-        || pageAccess.includes(`StockAdjustment_${legacyBranch}`)
-      );
-    }
-
-    if (!pageAccess.includes("StockAdjustment")) return false;
-    return hasAssignedBranch;
-  });
+  const accessibleStockAdjustmentBranches = branches.filter((b) => hasBranchAccess(b.name, "stock_adjustment"));
 
   const menuItems = [
     { title: "Dashboard",       path: "/",               icon: LayoutDashboard },

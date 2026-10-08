@@ -30,13 +30,26 @@ const Login = () => {
         defaultValues: { username: '', password: '' }
     });
 
+    const getLandingRoute = (userObj) => {
+        if (!userObj || userObj.role === 'Admin') return '/';
+        const pageAccess = userObj.page_access || [];
+        if (pageAccess.length === 0 || pageAccess.includes('Dashboard')) return '/';
+        if (pageAccess.some(k => k.startsWith('RawMaterial_'))) return '/raw-material';
+        if (pageAccess.some(k => k.startsWith('FinishGood_'))) return '/finished-good';
+        if (pageAccess.some(k => k.startsWith('TradingMaterial_') || k === 'TradingMaterial')) return '/trading-material';
+        if (pageAccess.some(k => k.startsWith('StockAdjustment_') || k === 'StockAdjustment')) return '/stock-adjustment';
+        if (pageAccess.includes('History')) return '/history';
+        if (pageAccess.includes('Settings')) return '/settings';
+        return '/';
+    };
+
     const onSubmit = async (data) => {
         setLoading(true);
         const res = await login(data.username, data.password);
         setLoading(false);
         if (res.success) {
             showSuccess('Welcome back! Login successful.');
-            navigate('/');
+            navigate(getLandingRoute(res.user));
         } else {
             showError(res.message || 'Invalid username or password.');
         }

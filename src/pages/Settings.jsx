@@ -148,9 +148,10 @@ const emptyForm = {
 };
 
 const Settings = () => {
-  const { user } = useAuth();
+  const { user, canAccessPage } = useAuth();
   const { showSuccess, showError } = useToast();
   const isAdmin = user?.role === 'Admin';
+  const hasAccess = isAdmin || (canAccessPage ? canAccessPage('Settings') : true);
 
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -168,8 +169,9 @@ const Settings = () => {
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
+    if (!user || !hasAccess) return;
     fetchUsers();
-  }, []);
+  }, [user, hasAccess]);
 
   const fetchUsers = async () => {
     setLoading(true);
@@ -524,6 +526,14 @@ const Settings = () => {
       )}
     </div>
   );
+
+  if (!hasAccess) {
+    return (
+      <div className="py-12 text-center text-sm text-slate-400">
+        You do not have access to System Settings.
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6 w-full p-1.5 animate-slide-up pb-12">
