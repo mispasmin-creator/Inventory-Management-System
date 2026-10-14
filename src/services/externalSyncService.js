@@ -8,6 +8,7 @@ import {
   getLocalDateString,
   getOrderPendingQty,
   isBlankValue,
+  isLabTestRecorded,
   isMaterialReturnReason,
   isUnloadApprovalComplete,
   normalizeFirmKey,
@@ -657,13 +658,15 @@ export const buildFinishedGoodPurchaseMap = async (selectedDate = '') => {
     for (let from = 0; ; from += pageSize) {
       const { data, error } = await purchaseSupabase
         .from('LIFT-ACCOUNTS')
-        .select('id, "Firm Name", "Raw Material Name", "Actual Quantity", "Date Of Receiving", "Timestamp"')
+        .select('id, "Firm Name", "Raw Material Name", "Actual Quantity", "Date Of Receiving", "Timestamp", "Actual 2", "Area lifting"')
         .order('id', { ascending: false })
         .range(from, from + pageSize - 1);
 
       if (error) throw error;
 
       (data || []).forEach((row) => {
+        if (!isLabTestRecorded(row)) return;
+
         const firmKey = normalizeFirmKey(row['Firm Name']);
         const productKey = normalizeItemKey(row['Raw Material Name']);
         const rawQuantity = row['Actual Quantity'];
@@ -867,7 +870,7 @@ export const buildLiftDataMaps = async (selectedDate = '') => {
     for (let from = 0; ; from += pageSize) {
       const { data, error } = await purchaseSupabase
         .from('LIFT-ACCOUNTS')
-        .select('id, "Lift No", "Firm Name", "Raw Material Name", "Actual Quantity", "Rate", "Transporter Rate", "Lifting Qty", "Total Bags Qty", "Type Of Transporting Rate", "Date Of Receiving", "Actual 1", "Unload Approval Status", "Unload Approval Required", "Planned 2", "Actual 2"')
+        .select('id, "Lift No", "Firm Name", "Raw Material Name", "Actual Quantity", "Rate", "Transporter Rate", "Lifting Qty", "Total Bags Qty", "Type Of Transporting Rate", "Date Of Receiving", "Actual 1", "Unload Approval Status", "Unload Approval Required", "Planned 2", "Actual 2", "Area lifting"')
         .not('Actual 1', 'is', null)
         .not('Actual Quantity', 'is', null)
         .order('Actual 1', { ascending: false })
@@ -896,10 +899,10 @@ export const buildLiftDataMaps = async (selectedDate = '') => {
       const rowDate = getLocalDateString(row['Date Of Receiving']);
       const isInSelectedPeriod = !selectedDate || (rowDate && rowDate >= selectedDate);
 
-      // Accumulate only receipts whose quality-check process has completed.
+      // Accumulate only receipts whose quality-check process has completed and whose lab test is recorded.
       const rawActualQuantity = row['Actual Quantity'];
       const actualQuantity = Number(rawActualQuantity);
-      if (isInSelectedPeriod && Number.isFinite(actualQuantity)) {
+      if (isInSelectedPeriod && Number.isFinite(actualQuantity) && isLabTestRecorded(row)) {
         // Light Diesel Oil is purchased in MT; convert to Ltr (x1000) so it matches the
         // unit used everywhere else (production usage, op stock, etc.) — RATE_DIVIDE_BY_1000_ITEM_KEYS.
         const convertedActualQuantity = RATE_DIVIDE_BY_1000_ITEM_KEYS.has(itemKey)

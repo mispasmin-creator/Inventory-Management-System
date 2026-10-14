@@ -7,7 +7,7 @@ import Table from '../components/Table';
 import { useToast } from '../components/Toast';
 import { useAuth } from '../hooks/useAuth';
 import { supabase, purchaseSupabase, orderSupabase } from '../services/supabaseClient';
-import { isMaterialReturnReason } from '../services/helpers';
+import { isLabTestRecorded, isMaterialReturnReason } from '../services/helpers';
 import { fetchApprovedSaleForm3Map } from '../services/externalSyncService';
 
 const branchOptions = ['Purab', 'Pmmpl', 'Rkl'];
@@ -62,7 +62,7 @@ const orderFirmNameMap = { puraborder: 'Purab', rklorder: 'Rkl', pmmplorder: 'Pm
 const normalizeOrderFirmName = (value) => orderFirmNameMap[normalizeItemKey(value)] || value;
 
 // Purchase Received: same source/logic as the Raw Material screen's purchase quantity —
-// LIFT-ACCOUNTS "Actual Quantity" for receipts whose quality-check ("Actual 1") is complete.
+// LIFT-ACCOUNTS "Actual Quantity" for receipts whose quality-check ("Actual 1") is complete and lab test is recorded.
 const fetchPurchaseReceivedMap = async () => {
   const pageSize = 1000;
   const map = {};
@@ -70,13 +70,14 @@ const fetchPurchaseReceivedMap = async () => {
     for (let from = 0; ; from += pageSize) {
       const { data, error } = await purchaseSupabase
         .from('LIFT-ACCOUNTS')
-        .select('"Firm Name", "Raw Material Name", "Actual Quantity", "Actual 1", "Date Of Receiving"')
+        .select('"Firm Name", "Raw Material Name", "Actual Quantity", "Actual 1", "Date Of Receiving", "Actual 2", "Area lifting"')
         .not('Actual 1', 'is', null)
         .not('Actual Quantity', 'is', null)
         .range(from, from + pageSize - 1);
       if (error) throw error;
 
       (data || []).forEach((row) => {
+        if (!isLabTestRecorded(row)) return;
         const rowDate = getLocalDateString(row['Date Of Receiving'] || row['Actual 1']);
         if (rowDate && rowDate < INVENTORY_START_DATE) return;
 

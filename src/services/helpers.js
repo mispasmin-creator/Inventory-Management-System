@@ -191,6 +191,13 @@ export const isUnloadApprovalComplete = (row) => {
   return false;
 };
 
+// A purchase receipt counts towards inventory only once its lab test is recorded
+// (LIFT-ACCOUNTS "Actual 2" is filled, whether the test was Accepted or Rejected).
+// "Direct Supply To Party" lifts skip the Lab page, so they never get "Actual 2" and are not gated.
+export const isLabTestRecorded = (row) =>
+  !isBlankValue(row['Actual 2']) ||
+  String(row['Area lifting'] || '').trim().toLowerCase() === 'direct supply to party';
+
 export const getOrderPendingQty = (order) => {
   const totalQty = Number(order.Quantity) || 0;
   const deliveredQty = Number(order.Delivered) || 0;

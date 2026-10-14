@@ -11,6 +11,7 @@ import {
   calculateOptimumStockTotal,
   calculateStockTotal,
   getLocalDateString,
+  isLabTestRecorded,
   hasActualLevel,
   mergeDuplicateInventoryRows,
   normalizeFirmKey,
@@ -573,12 +574,13 @@ export const inventoryService = {
     for (let from = 0; ; from += pageSize) {
       const { data, error } = await purchaseSupabase
         .from('LIFT-ACCOUNTS')
-        .select('id, "Lift No", "Firm Name", "Raw Material Name", "Actual Quantity", "Date Of Receiving", "Timestamp"')
+        .select('id, "Lift No", "Firm Name", "Raw Material Name", "Actual Quantity", "Date Of Receiving", "Timestamp", "Actual 2", "Area lifting"')
         .order('id', { ascending: false })
         .range(from, from + pageSize - 1);
       if (error) throw error;
 
       (data || []).forEach((row) => {
+        if (!isLabTestRecorded(row)) return;
         if (normalizeFirmKey(row['Firm Name']) !== firmKey) return;
         if (normalizeItemKey(row['Raw Material Name']) !== productKey) return;
         const rawQuantity = row['Actual Quantity'];
