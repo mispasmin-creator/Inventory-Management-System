@@ -52,7 +52,7 @@ Create a new Google Sheet in Google Drive. You need to create the following work
 
 1. In your Google Sheet, click **Extensions > Apps Script** in the top menu.
 2. Delete any boilerplate code inside the editor.
-3. Open `google-apps-script.js` from this project's root folder, copy the entire file contents, and paste it into the Apps Script editor.
+3. Open `appscript/google-apps-script.js` from this project, copy the entire file contents, and paste it into the Apps Script editor.
 4. Click the **Save** (floppy disk) icon.
 5. In the top right, click **Deploy > New deployment**.
 6. Click the gear icon next to "Select type" and choose **Web app**.

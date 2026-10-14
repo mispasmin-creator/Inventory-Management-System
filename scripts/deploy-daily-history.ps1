@@ -6,6 +6,9 @@ $projectRef = 'ozrgaddkpixwvcyypqid'
 
 # --- read .env ---
 $envPath = Join-Path $PSScriptRoot '.env'
+if (-not (Test-Path $envPath)) {
+    $envPath = Join-Path (Split-Path $PSScriptRoot -Parent) '.env'
+}
 if (-not (Test-Path $envPath)) { throw ".env not found at $envPath" }
 
 $envVars = @{}
