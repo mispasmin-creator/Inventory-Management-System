@@ -7,6 +7,13 @@ export const normalizeFirmKey = (value) =>
     .replace(/pmmpl|madhya/g, 'pmmpl')
     .replace(/[^a-z0-9]/g, '');
 
+// Only Material Return rows with this reason count towards inventory.
+// Other reasons (Material Shortage, Quality Issue, Rate Difference, Material Reject, Other) are ignored.
+export const MATERIAL_RETURN_REASON = 'material return';
+
+export const isMaterialReturnReason = (value) =>
+  String(value || '').trim().toLowerCase() === MATERIAL_RETURN_REASON;
+
 export const normalizeItemKey = (value) =>
   String(value || '')
     .toLowerCase()

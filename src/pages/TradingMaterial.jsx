@@ -7,6 +7,8 @@ import Table from '../components/Table';
 import { useToast } from '../components/Toast';
 import { useAuth } from '../hooks/useAuth';
 import { supabase, purchaseSupabase, orderSupabase } from '../services/supabaseClient';
+import { isMaterialReturnReason } from '../services/helpers';
+import { fetchApprovedSaleForm3Map } from '../services/externalSyncService';
 
 const branchOptions = ['Purab', 'Pmmpl', 'Rkl'];
 
@@ -138,6 +140,7 @@ const fetchSalesMaps = async () => {
   try {
     const orderMap = new Map();
     const ordersByDoNumber = {};
+    const approvedSaleForm3 = await fetchApprovedSaleForm3Map();
     for (let from = 0; ; from += pageSize) {
       const { data: orderRows, error: orderError } = await orderSupabase
         .from('ORDER RECEIPT')
@@ -172,7 +175,10 @@ const fetchSalesMaps = async () => {
       if (dispatchError) throw dispatchError;
 
       (dispatchRows || []).forEach((row) => {
-        const invoiceActualizedAt = String(row['Bill Date'] || row['Actual4'] || '').trim();
+        const approvedAt = approvedSaleForm3.get(String(row.id ?? '').trim());
+        if (approvedAt === undefined) return;
+
+        const invoiceActualizedAt = String(approvedAt || row['Bill Date'] || row['Actual4'] || '').trim();
         if (!invoiceActualizedAt) return;
         const rowDate = getLocalDateString(invoiceActualizedAt);
         if (rowDate && rowDate < INVENTORY_START_DATE) return;
@@ -198,13 +204,14 @@ const fetchSalesMaps = async () => {
     for (let from = 0; ; from += pageSize) {
       const { data: returnRows, error: returnError } = await orderSupabase
         .from('Material Return')
-        .select('id, "D.O Number", "Party Name", "Product Name", "Qty Of Return Material", "Qty", "Return Dispatched At", "Actual5", "Debit Note Issued At"')
+        .select('id, "D.O Number", "Party Name", "Product Name", "Qty Of Return Material", "Qty", "Return Dispatched At", "Actual5", "Debit Note Issued At", "Reason Of Material Return"')
         .not('Actual5', 'is', null)
         .not('Debit Note Issued At', 'is', null)
         .range(from, from + pageSize - 1);
       if (returnError) throw returnError;
 
       (returnRows || []).forEach((row) => {
+        if (!isMaterialReturnReason(row['Reason Of Material Return'])) return;
         const returnDispatchedAt = row['Return Dispatched At'] || '';
         if (!returnDispatchedAt || String(returnDispatchedAt).trim() === '') return;
         const rowDate = getLocalDateString(returnDispatchedAt);

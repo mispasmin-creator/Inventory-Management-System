@@ -30,7 +30,8 @@ import {
   buildFinishedGoodPurchaseReturnMap,
   buildFinishedGoodReturnMap,
   buildLiftDataMaps,
-  buildProductTabRateMap
+  buildProductTabRateMap,
+  fetchApprovedSaleForm3Map
 } from './externalSyncService';
 
 export const inventoryService = {
@@ -496,6 +497,7 @@ export const inventoryService = {
     const orderMap = new Map();
     const entries = [];
     const normalizeJoinId = (value) => String(value ?? '').trim();
+    const approvedSaleForm3 = await fetchApprovedSaleForm3Map();
 
     for (let from = 0; ; from += pageSize) {
       const { data, error } = await orderSupabase
@@ -522,7 +524,10 @@ export const inventoryService = {
       if (error) throw error;
 
       (data || []).forEach((row) => {
-        const invoiceActualizedAt = String(row['Bill Date'] || row.Actual4 || '').trim();
+        const approvedAt = approvedSaleForm3.get(normalizeJoinId(row.id));
+        if (approvedAt === undefined) return;
+
+        const invoiceActualizedAt = String(approvedAt || row['Bill Date'] || row.Actual4 || '').trim();
         if (!invoiceActualizedAt) return;
 
         const po = orderMap.get(normalizeJoinId(row.po_id)) || {};

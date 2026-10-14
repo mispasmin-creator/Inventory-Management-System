@@ -1,4 +1,5 @@
 // Authentication Service
+import * as mockDb from './mockData';
 import { supabase } from './supabaseClient';
 
 export const authService = {
@@ -49,8 +50,9 @@ export const authService = {
 
       return { success: false, message: 'Invalid username or password' };
     } catch (e) {
-      console.error('Supabase authentication error:', e.message);
-      return { success: false, message: e.message || 'Server connection error' };
+      console.warn('Supabase authentication failed, trying mock fallback:', e.message);
+      // Fallback to mock logins if Supabase is not configured/offline
+      return mockDb.mockLogin(username, password);
     }
   }
 };

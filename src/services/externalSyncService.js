@@ -8,6 +8,7 @@ import {
   getLocalDateString,
   getOrderPendingQty,
   isBlankValue,
+  isMaterialReturnReason,
   isUnloadApprovalComplete,
   normalizeFirmKey,
   normalizeItemKey,
@@ -491,6 +492,33 @@ export const buildFinishedGoodPurchaseReturnMap = async (selectedDate = '') => {
   return purchaseReturnMap;
 };
 
+// A dispatch counts towards inventory only once its SALE FORM 3 row is Approved.
+// Pending rows are not yet final and Rejected rows never move forward, so both are ignored.
+// Returns Map(dispatch_id -> approval timestamp ("Actual")).
+export const fetchApprovedSaleForm3Map = async () => {
+  const pageSize = 1000;
+  const approvedMap = new Map();
+
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await orderSupabase
+      .from('SALE FORM 3')
+      .select('dispatch_id, "Status", "Actual"')
+      .eq('Status', 'Approved')
+      .range(from, from + pageSize - 1);
+
+    if (error) throw error;
+
+    (data || []).forEach((row) => {
+      const dispatchId = String(row.dispatch_id ?? '').trim();
+      if (dispatchId) approvedMap.set(dispatchId, String(row.Actual || '').trim());
+    });
+
+    if (!data || data.length < pageSize) break;
+  }
+
+  return approvedMap;
+};
+
 export const buildFinishedGoodDispatchMap = async (selectedDate = '') => {
   const pageSize = 1000;
   const orderMap = new Map();
@@ -498,6 +526,8 @@ export const buildFinishedGoodDispatchMap = async (selectedDate = '') => {
   const normalizeJoinId = (value) => String(value ?? '').trim();
 
   try {
+    const approvedSaleForm3 = await fetchApprovedSaleForm3Map();
+
     for (let from = 0; ; from += pageSize) {
       const { data, error } = await orderSupabase
         .from('ORDER RECEIPT')
@@ -525,7 +555,10 @@ export const buildFinishedGoodDispatchMap = async (selectedDate = '') => {
       if (error) throw error;
 
       (data || []).forEach((row) => {
-        const invoiceActualizedAt = String(row['Bill Date'] || row.Actual4 || '').trim();
+        const approvedAt = approvedSaleForm3.get(normalizeJoinId(row.id));
+        if (approvedAt === undefined) return;
+
+        const invoiceActualizedAt = String(approvedAt || row['Bill Date'] || row.Actual4 || '').trim();
         if (!invoiceActualizedAt) return;
 
         const po = orderMap.get(normalizeJoinId(row.po_id)) || {};
@@ -692,7 +725,7 @@ export const buildFinishedGoodReturnMap = async (selectedDate = '') => {
     for (let from = 0; ; from += pageSize) {
       const { data, error } = await orderSupabase
         .from('Material Return')
-        .select('id, "D.O Number", "Party Name", "Product Name", "Qty Of Return Material", "Qty", "Return Dispatched At", "Actual5", "Debit Note Issued At"')
+        .select('id, "D.O Number", "Party Name", "Product Name", "Qty Of Return Material", "Qty", "Return Dispatched At", "Actual5", "Debit Note Issued At", "Reason Of Material Return"')
         .not('Actual5', 'is', null)
         .not('Debit Note Issued At', 'is', null)
         .range(from, from + pageSize - 1);
@@ -700,6 +733,7 @@ export const buildFinishedGoodReturnMap = async (selectedDate = '') => {
       if (error) throw error;
 
       (data || []).forEach((row) => {
+        if (!isMaterialReturnReason(row['Reason Of Material Return'])) return;
         const returnDispatchedAt = row['Return Dispatched At'] || '';
         if (!returnDispatchedAt || String(returnDispatchedAt).trim() === '') return;
 
@@ -993,7 +1027,7 @@ export const buildLiftDataMaps = async (selectedDate = '') => {
       semiFinesMap: {},
       semiGreenMap: {},
       semiClinkerMap: {},
-      semiRawConsumptionMap,
+      semiRawConsumptionMap: {},
       crushingGrainsMap: {},
       crushingFinesMap: {},
       crushingLumpsMap: {},
