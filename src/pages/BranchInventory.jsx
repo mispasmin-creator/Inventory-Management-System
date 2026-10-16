@@ -4,6 +4,8 @@ import { useAuth } from '../hooks/useAuth';
 import { useInventory } from '../hooks/useInventory';
 import { apiService } from '../services/api';
 import { purchaseSupabase, supabase, productionSupabase } from '../services/supabaseClient';
+import { buildRawMaterialPipelineMap } from '../services/externalSyncService';
+import { normalizeFirmKey, normalizeItemKey } from '../services/helpers';
 import Table from '../components/Table';
 import Modal from '../components/Modal';
 import GlassCard from '../components/GlassCard';
@@ -320,6 +322,8 @@ const BranchInventory = () => {
   const [transferRequests, setTransferRequests] = useState([]);
   const [transfersLoading, setTransfersLoading] = useState(false);
   const [rawFactoryEntries, setRawFactoryEntries] = useState([]);
+  // Pipeline (pending on Purchase Lab page): key = "firmKey::itemKey" → pending Actual Quantity
+  const [pipelineMap, setPipelineMap] = useState({});
   // Crushing actual processing cost map: key = "firmLower::fgNameLower" → cost
   const [crushingCostMap, setCrushingCostMap] = useState({});
   // Semi processing actual cost map
@@ -426,6 +430,70 @@ const BranchInventory = () => {
     fetchRawFactoryEntries();
     fetchCrushingRates();
     fetchSemiProcessingCosts();
+  }, [type]);
+
+  // Pipeline (pending at Lab) stays live. Inventory changes are emitted by the
+  // database trigger after Actual 2 is submitted, so refresh both the pipeline
+  // and the calculated inventory without waiting for a page reload.
+  // The channel is created once per `type` (not on every page/search/filter change); the handlers read
+  // the latest screen state through a ref so they never act on stale values and never re-subscribe.
+  const liveRefreshStateRef = React.useRef({});
+  useEffect(() => {
+    liveRefreshStateRef.current = { activeBranch, canReadActiveBranch, currentPage, pageSize, debouncedSearchQuery, firmFilter, fetchInventory };
+  });
+
+  useEffect(() => {
+    if (type !== 'raw_material') return;
+    let active = true;
+    let inventoryTimer = null;
+    let pipelineTimer = null;
+    // Concurrent identical requests share one Supabase fetch (see shareInFlight); the short debounce
+    // additionally collapses a burst of realtime events (one lab submit emits several) into one refresh.
+    const refreshPipelineNow = () => buildRawMaterialPipelineMap()
+      .then((map) => { if (active) setPipelineMap(map); })
+      .catch((error) => console.warn('Pipeline refresh failed:', error.message));
+    const refreshPipeline = () => {
+      clearTimeout(pipelineTimer);
+      pipelineTimer = setTimeout(refreshPipelineNow, 300);
+    };
+    const refreshInventoryNow = () => {
+      const s = liveRefreshStateRef.current;
+      refreshPipelineNow();
+      if (!s.activeBranch || !s.canReadActiveBranch) return;
+      s.fetchInventory(
+        s.activeBranch,
+        type,
+        INVENTORY_START_DATE,
+        s.currentPage,
+        s.pageSize,
+        s.debouncedSearchQuery,
+        s.firmFilter
+      );
+      apiService.getInventory(s.activeBranch, INVENTORY_START_DATE, 1, 100000, '', s.firmFilter)
+        .then((response) => { if (active) setTotalsItems(response.data || []); })
+        .catch((error) => console.warn('Live inventory refresh failed:', error.message));
+    };
+    const refreshInventory = () => {
+      clearTimeout(inventoryTimer);
+      inventoryTimer = setTimeout(refreshInventoryNow, 300);
+    };
+    refreshPipelineNow();
+
+    const channel = purchaseSupabase
+      .channel('pipeline-lift-accounts')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'LIFT-ACCOUNTS' }, refreshPipeline)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'inventory' }, refreshInventory)
+      .subscribe();
+    // Focus only refreshes the (cheap) pipeline; inventory itself is refreshed by the realtime event above.
+    window.addEventListener('focus', refreshPipeline);
+
+    return () => {
+      active = false;
+      clearTimeout(inventoryTimer);
+      clearTimeout(pipelineTimer);
+      window.removeEventListener('focus', refreshPipeline);
+      purchaseSupabase.removeChannel(channel);
+    };
   }, [type]);
 
   const addOptimumStock = useWatch({ control: addControl, name: 'optimum_stock' });
@@ -792,6 +860,10 @@ const BranchInventory = () => {
     return `₹${cleanNum.toLocaleString()}`;
   };
 
+  // Total Actual Quantity of this item's receipts still pending on the Purchase Lab page.
+  const getPipelineQty = (item, map) =>
+    map[`${normalizeFirmKey(item.firm_name)}::${normalizeItemKey(item.item_name)}`] || 0;
+
   // Raw Material Columns
   const rawMaterialColumns = [
     { header: 'S. No.', accessor: 's_no', render: (row) => row.s_no ?? '' },
@@ -897,6 +969,7 @@ const BranchInventory = () => {
       },
       render: (row) => row.actual_level !== null && row.actual_level !== undefined && row.actual_level !== '' ? Number(row.actual_level).toLocaleString() : ''
     },
+    { header: 'Pipeline', accessor: 'pipeline', render: (row) => row.pipeline ? renderRawNumber(row.pipeline) : '-' },
     {
       header: 'Product Rate',
       accessor: 'product_rate',
@@ -971,8 +1044,8 @@ const BranchInventory = () => {
       semiProcessingCostMap,
       extraRateSiblingSource: inventoryItems,
       finesSiblingSource
-    }));
-  }, [inventoryItems, totalsItems, type, rawFactoryEntries, crushingCostMap, semiProcessingCostMap]);
+    })).map(item => ({ ...item, pipeline: getPipelineQty(item, pipelineMap) }));
+  }, [inventoryItems, totalsItems, type, rawFactoryEntries, crushingCostMap, semiProcessingCostMap, pipelineMap]);
 
   const displayedInventoryItems = React.useMemo(() => {
     const filtered = (processedInventoryItems || []).filter(item => {
@@ -1033,7 +1106,7 @@ const BranchInventory = () => {
       semiProcessingCostMap,
       extraRateSiblingSource: items,
       finesSiblingSource: items
-    }));
+    })).map(item => ({ ...item, pipeline: getPipelineQty(item, pipelineMap) }));
 
     const filtered = processed.filter(item => {
       const firmName = item.firm_name || '';
@@ -1056,7 +1129,7 @@ const BranchInventory = () => {
       ...item,
       s_no: index + 1
     }));
-  }, [activeBranch, firmFilter, rawFactoryEntries, crushingCostMap, semiProcessingCostMap, accessibleBranchOptions]);
+  }, [activeBranch, firmFilter, rawFactoryEntries, crushingCostMap, semiProcessingCostMap, accessibleBranchOptions, pipelineMap]);
 
   const totals = React.useMemo(() => {
     const res = {

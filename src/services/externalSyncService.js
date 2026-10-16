@@ -446,7 +446,10 @@ export const buildFinishedGoodConsumptionMap = async (selectedDate = '') => {
   return consumptionMap;
 };
 
-export const buildFinishedGoodPurchaseReturnMap = async (selectedDate = '') => {
+export const buildFinishedGoodPurchaseReturnMap = (selectedDate = '') =>
+  shareInFlight(`fg-purchase-return::${selectedDate || ''}`, () => fetchFinishedGoodPurchaseReturnMap(selectedDate)).then(cloneKeyedMap);
+
+const fetchFinishedGoodPurchaseReturnMap = async (selectedDate = '') => {
   const pageSize = 1000;
   const purchaseReturnMap = {};
 
@@ -650,7 +653,10 @@ export const buildFinishedGoodPendingOrderMap = async () => {
   return pendingMap;
 };
 
-export const buildFinishedGoodPurchaseMap = async (selectedDate = '') => {
+export const buildFinishedGoodPurchaseMap = (selectedDate = '') =>
+  shareInFlight(`fg-purchase::${selectedDate || ''}`, () => fetchFinishedGoodPurchaseMap(selectedDate)).then(cloneKeyedMap);
+
+const fetchFinishedGoodPurchaseMap = async (selectedDate = '') => {
   const pageSize = 1000;
   const purchaseMap = {};
 
@@ -658,7 +664,7 @@ export const buildFinishedGoodPurchaseMap = async (selectedDate = '') => {
     for (let from = 0; ; from += pageSize) {
       const { data, error } = await purchaseSupabase
         .from('LIFT-ACCOUNTS')
-        .select('id, "Firm Name", "Raw Material Name", "Actual Quantity", "Date Of Receiving", "Timestamp", "Actual 2", "Area lifting"')
+        .select('id, "Firm Name", "Raw Material Name", "Actual Quantity", "Date Of Receiving", "Date Of Test", "Timestamp", "Actual 2", "Area lifting"')
         .order('id', { ascending: false })
         .range(from, from + pageSize - 1);
 
@@ -679,7 +685,7 @@ export const buildFinishedGoodPurchaseMap = async (selectedDate = '') => {
           purchaseMap[key] = { before: 0, after: 0, total: 0 };
         }
 
-        const rowDate = getLocalDateString(row['Date Of Receiving'] || row['Timestamp']);
+        const rowDate = getLocalDateString(row['Date Of Test'] || row['Actual 2'] || row['Date Of Receiving'] || row['Timestamp']);
         purchaseMap[key].total += quantity;
         if (selectedDate && rowDate && rowDate >= selectedDate) {
           purchaseMap[key].after += quantity;
@@ -696,6 +702,58 @@ export const buildFinishedGoodPurchaseMap = async (selectedDate = '') => {
 
   return purchaseMap;
 };
+
+// Raw material "Pipeline": receipts pending on the Purchase Lab page (Planned 2 set, Actual 2 empty,
+// unload approval cleared, not Direct Supply To Party). Returns "firmKey::itemKey" -> total Actual Quantity.
+const fetchRawMaterialPipelineMap = async () => {
+  const pageSize = 1000;
+  const pipelineMap = {};
+
+  try {
+    for (let from = 0; ; from += pageSize) {
+      const { data, error } = await purchaseSupabase
+        .from('LIFT-ACCOUNTS')
+        .select('id, "Firm Name", "Raw Material Name", "Actual Quantity", "Planned 2", "Actual 2", "Unload Approval Required", "Unload Approval Status", "Area lifting"')
+        .not('Planned 2', 'is', null)
+        // "Actual 2" is a timestamp column (cannot hold '' or whitespace), so IS NULL is exactly the
+        // "blank" check the pending logic applies below — letting the server drop the completed rows.
+        .is('Actual 2', null)
+        .order('id', { ascending: false })
+        .range(from, from + pageSize - 1);
+
+      if (error) throw error;
+
+      (data || []).forEach((row) => {
+        if (isBlankValue(row['Planned 2']) || !isBlankValue(row['Actual 2'])) return;
+        if (String(row['Area lifting'] || '').trim() === 'Direct Supply To Party') return;
+
+        const needsUnloadApproval = String(row['Unload Approval Required'] || '').toLowerCase() === 'yes';
+        const unloadStatus = String(row['Unload Approval Status'] || '').toLowerCase();
+        if (needsUnloadApproval && unloadStatus !== 'approved' && unloadStatus !== 'completed') return;
+
+        const firmKey = normalizeFirmKey(row['Firm Name']);
+        const itemKey = normalizeItemKey(row['Raw Material Name']);
+        const rawQuantity = row['Actual Quantity'];
+        const quantity = Number(rawQuantity);
+        if (!firmKey || !itemKey || isBlankValue(rawQuantity) || !Number.isFinite(quantity)) return;
+
+        // Same unit conversion as the purchase quantity (Light Diesel Oil: MT -> Ltr).
+        const convertedQuantity = RATE_DIVIDE_BY_1000_ITEM_KEYS.has(itemKey) ? quantity * 1000 : quantity;
+        const key = `${firmKey}::${itemKey}`;
+        pipelineMap[key] = (pipelineMap[key] || 0) + convertedQuantity;
+      });
+
+      if (!data || data.length < pageSize) break;
+    }
+  } catch (error) {
+    console.warn('Supabase raw material pipeline sync failed:', error.message);
+  }
+
+  return pipelineMap;
+};
+
+export const buildRawMaterialPipelineMap = () =>
+  shareInFlight('raw-material-pipeline', fetchRawMaterialPipelineMap).then((map) => ({ ...map }));
 
 export const buildFinishedGoodReturnMap = async (selectedDate = '') => {
   const pageSize = 1000;
@@ -729,6 +787,7 @@ export const buildFinishedGoodReturnMap = async (selectedDate = '') => {
       const { data, error } = await orderSupabase
         .from('Material Return')
         .select('id, "D.O Number", "Party Name", "Product Name", "Qty Of Return Material", "Qty", "Return Dispatched At", "Actual5", "Debit Note Issued At", "Reason Of Material Return"')
+        .eq('Reason Of Material Return', 'Material Return')
         .not('Actual5', 'is', null)
         .not('Debit Note Issued At', 'is', null)
         .range(from, from + pageSize - 1);
@@ -861,25 +920,62 @@ export const buildProductTabRateMap = async () => {
   return rateMap;
 };
 
-export const buildLiftDataMaps = async (selectedDate = '') => {
-  const pageSize = 1000;
-  const liftRows = [];
+// In-flight request sharing: identical concurrent builders (e.g. the paginated table fetch and the
+// grand-totals fetch on the same screen load) share ONE Supabase scan instead of each downloading
+// the same LIFT-ACCOUNTS history. The entry is removed as soon as the promise settles, so this is
+// deliberately NOT a TTL/long-lived cache: any request started after the first one finishes
+// queries Supabase again, and data never goes stale. A rejected promise is not retained either.
+const inFlightRequests = new Map();
 
+export const shareInFlight = (key, producer) => {
+  const existing = inFlightRequests.get(key);
+  if (existing) return existing;
+
+  const promise = Promise.resolve()
+    .then(producer)
+    .finally(() => {
+      if (inFlightRequests.get(key) === promise) inFlightRequests.delete(key);
+    });
+  inFlightRequests.set(key, promise);
+  return promise;
+};
+
+// Same idea for a single "key -> value" map: one level of copy so callers never share mutable state.
+const cloneKeyedMap = (map) => {
+  const copy = {};
+  Object.keys(map).forEach((key) => {
+    const value = map[key];
+    copy[key] = Array.isArray(value) ? value.slice() : (value && typeof value === 'object' ? { ...value } : value);
+  });
+  return copy;
+};
+
+// Each caller gets its own copy of every top-level map so one caller can never mutate another's result.
+const cloneMapBundle = (bundle) => {
+  const copy = {};
+  Object.keys(bundle).forEach((name) => {
+    copy[name] = { ...bundle[name] };
+  });
+  return copy;
+};
+
+// LIFT-ACCOUNTS is summarised inside the database (database/lift_inventory_summary.sql) instead of being
+// downloaded row by row. Returns only the rows that matter for the rate maps, plus the per-product
+// quantity lists (already filtered / ordered by the database) that are added up below.
+const fetchLiftSummary = async (selectedDate) => {
+  const { data, error } = await purchaseSupabase.rpc('lift_inventory_summary', {
+    p_start_date: selectedDate || '',
+    p_bag_item_keys: [...BAG_RATE_ITEM_KEYS]
+  });
+  if (error) throw error;
+  return data;
+};
+
+const fetchLiftDataMaps = async (selectedDate = '') => {
   try {
-    // 1. Fetch only receipts completed through Receipt Of Material / Physical Quality Check.
-    for (let from = 0; ; from += pageSize) {
-      const { data, error } = await purchaseSupabase
-        .from('LIFT-ACCOUNTS')
-        .select('id, "Lift No", "Firm Name", "Raw Material Name", "Actual Quantity", "Rate", "Transporter Rate", "Lifting Qty", "Total Bags Qty", "Type Of Transporting Rate", "Date Of Receiving", "Actual 1", "Unload Approval Status", "Unload Approval Required", "Planned 2", "Actual 2", "Area lifting"')
-        .not('Actual 1', 'is', null)
-        .not('Actual Quantity', 'is', null)
-        .order('Actual 1', { ascending: false })
-        .range(from, from + pageSize - 1);
-
-      if (error) throw error;
-      liftRows.push(...(data || []));
-      if (!data || data.length < pageSize) break;
-    }
+    const summary = await fetchLiftSummary(selectedDate);
+    const liftRows = summary.rate_rows || [];
+    const summaryQuantities = summary.quantities || [];
 
     const actualQuantityMap = {};
     const purchaseQuantityMap = {};
@@ -896,21 +992,7 @@ export const buildLiftDataMaps = async (selectedDate = '') => {
       if (!firmKey || !itemKey) return;
 
       const key = `${firmKey}::${itemKey}`;
-      const rowDate = getLocalDateString(row['Date Of Receiving']);
-      const isInSelectedPeriod = !selectedDate || (rowDate && rowDate >= selectedDate);
-
-      // Accumulate only receipts whose quality-check process has completed and whose lab test is recorded.
-      const rawActualQuantity = row['Actual Quantity'];
-      const actualQuantity = Number(rawActualQuantity);
-      if (isInSelectedPeriod && Number.isFinite(actualQuantity) && isLabTestRecorded(row)) {
-        // Light Diesel Oil is purchased in MT; convert to Ltr (x1000) so it matches the
-        // unit used everywhere else (production usage, op stock, etc.) — RATE_DIVIDE_BY_1000_ITEM_KEYS.
-        const convertedActualQuantity = RATE_DIVIDE_BY_1000_ITEM_KEYS.has(itemKey)
-          ? actualQuantity * 1000
-          : actualQuantity;
-        actualQuantityMap[key] = (actualQuantityMap[key] || 0) + convertedActualQuantity;
-        purchaseQuantityMap[key] = (purchaseQuantityMap[key] || 0) + convertedActualQuantity;
-      }
+      const rowDate = getLocalDateString(row['Date Of Test'] || row['Actual 2'] || row['Date Of Receiving']);
 
       // Product Rate: take the Rate from the LIFT-ACCOUNTS record with the latest Date Of Receiving.
       // For packaging bag items (BAG_RATE_ITEM_KEYS), the rate is instead computed as
@@ -955,6 +1037,20 @@ export const buildLiftDataMaps = async (selectedDate = '') => {
           liftingQty !== 0
         ) ? roundTo(transporterRate / liftingQty, 2) : 0;
       }
+    });
+
+    // Same per-row conversion and the same left-to-right additions (in the same row order) as the
+    // original row scan, so the totals are bit-for-bit the same.
+    summaryQuantities.forEach(({ key, item_key: itemKey, quantities }) => {
+      quantities.forEach((rawActualQuantity) => {
+        const actualQuantity = Number(rawActualQuantity);
+        if (!Number.isFinite(actualQuantity)) return;
+        const convertedActualQuantity = RATE_DIVIDE_BY_1000_ITEM_KEYS.has(itemKey)
+          ? actualQuantity * 1000
+          : actualQuantity;
+        actualQuantityMap[key] = (actualQuantityMap[key] || 0) + convertedActualQuantity;
+        purchaseQuantityMap[key] = (purchaseQuantityMap[key] || 0) + convertedActualQuantity;
+      });
     });
 
     const [
@@ -1038,3 +1134,6 @@ export const buildLiftDataMaps = async (selectedDate = '') => {
     };
   }
 };
+
+export const buildLiftDataMaps = (selectedDate = '') =>
+  shareInFlight(`lift-data-maps::${selectedDate || ''}`, () => fetchLiftDataMaps(selectedDate)).then(cloneMapBundle);

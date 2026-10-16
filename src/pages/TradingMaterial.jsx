@@ -70,7 +70,7 @@ const fetchPurchaseReceivedMap = async () => {
     for (let from = 0; ; from += pageSize) {
       const { data, error } = await purchaseSupabase
         .from('LIFT-ACCOUNTS')
-        .select('"Firm Name", "Raw Material Name", "Actual Quantity", "Actual 1", "Date Of Receiving", "Actual 2", "Area lifting"')
+        .select('"Firm Name", "Raw Material Name", "Actual Quantity", "Actual 1", "Date Of Receiving", "Date Of Test", "Actual 2", "Area lifting"')
         .not('Actual 1', 'is', null)
         .not('Actual Quantity', 'is', null)
         .range(from, from + pageSize - 1);
@@ -78,7 +78,7 @@ const fetchPurchaseReceivedMap = async () => {
 
       (data || []).forEach((row) => {
         if (!isLabTestRecorded(row)) return;
-        const rowDate = getLocalDateString(row['Date Of Receiving'] || row['Actual 1']);
+        const rowDate = getLocalDateString(row['Date Of Test'] || row['Actual 2'] || row['Date Of Receiving'] || row['Actual 1']);
         if (rowDate && rowDate < INVENTORY_START_DATE) return;
 
         const firmKey = normalizeFirmKey(row['Firm Name']);
@@ -206,6 +206,7 @@ const fetchSalesMaps = async () => {
       const { data: returnRows, error: returnError } = await orderSupabase
         .from('Material Return')
         .select('id, "D.O Number", "Party Name", "Product Name", "Qty Of Return Material", "Qty", "Return Dispatched At", "Actual5", "Debit Note Issued At", "Reason Of Material Return"')
+        .eq('Reason Of Material Return', 'Material Return')
         .not('Actual5', 'is', null)
         .not('Debit Note Issued At', 'is', null)
         .range(from, from + pageSize - 1);

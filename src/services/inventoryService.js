@@ -574,7 +574,7 @@ export const inventoryService = {
     for (let from = 0; ; from += pageSize) {
       const { data, error } = await purchaseSupabase
         .from('LIFT-ACCOUNTS')
-        .select('id, "Lift No", "Firm Name", "Raw Material Name", "Actual Quantity", "Date Of Receiving", "Timestamp", "Actual 2", "Area lifting"')
+        .select('id, "Lift No", "Firm Name", "Raw Material Name", "Actual Quantity", "Date Of Receiving", "Date Of Test", "Timestamp", "Actual 2", "Area lifting"')
         .order('id', { ascending: false })
         .range(from, from + pageSize - 1);
       if (error) throw error;
@@ -587,7 +587,7 @@ export const inventoryService = {
         const quantity = Number(rawQuantity);
         if (rawQuantity === null || rawQuantity === '' || !Number.isFinite(quantity)) return;
 
-        const rowDate = getLocalDateString(row['Date Of Receiving'] || row['Timestamp']);
+        const rowDate = getLocalDateString(row['Date Of Test'] || row['Actual 2'] || row['Date Of Receiving'] || row['Timestamp']);
         if (selectedDate && !(rowDate && rowDate >= selectedDate)) return;
         entries.push({
           source: 'Purchase Receipt',

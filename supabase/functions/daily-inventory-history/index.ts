@@ -75,6 +75,9 @@ const istToday = (): string => new Date(Date.now() + IST_OFFSET_MS).toISOString(
 const isBlankValue = (value: unknown): boolean =>
   value === null || value === undefined || (typeof value === 'string' && value.trim() === '');
 
+const isMaterialReturnReason = (value: unknown): boolean =>
+  String(value || '').trim().toLowerCase() === 'material return';
+
 const hasFiniteNumber = (value: unknown): boolean =>
   value !== null && value !== undefined && value !== '' && Number.isFinite(Number(value));
 
@@ -763,10 +766,14 @@ const buildFinishedGoodReturnMap = async (selectedDate: string) => {
   const returns = await fetchAll(
     db().orderDb,
     'Material Return',
-    'id, "D.O Number", "Party Name", "Product Name", "Qty Of Return Material", "Qty", "Return Dispatched At", "Actual5", "Debit Note Issued At"',
-    (q) => q.not('Actual5', 'is', null).not('Debit Note Issued At', 'is', null),
+    'id, "D.O Number", "Party Name", "Product Name", "Qty Of Return Material", "Qty", "Return Dispatched At", "Actual5", "Debit Note Issued At", "Reason Of Material Return"',
+    (q) => q
+      .eq('Reason Of Material Return', 'Material Return')
+      .not('Actual5', 'is', null)
+      .not('Debit Note Issued At', 'is', null),
   );
   returns.forEach((row) => {
+    if (!isMaterialReturnReason(row['Reason Of Material Return'])) return;
     const returnDispatchedAt = row['Return Dispatched At'] || '';
     if (!returnDispatchedAt || String(returnDispatchedAt).trim() === '') return;
     const productKey = normalizeItemKey(row['Product Name']);
