@@ -244,12 +244,16 @@ const computeProcessedRawMaterialItem = (item, {
         extraLabel = 'Lumps';
       }
     } else if (['ferro chrome (0-1)', 'ferro chrome (1-3)', 'ferro chrome (3-5)'].includes(itemKey)) {
-      const slagItem = extraRateSiblingSource.find(
-        (i) => i.firm_name?.trim().toLowerCase() === firmKey && i.item_name?.trim().toLowerCase() === 'ferro chrome slag'
-      );
-      if (slagItem) {
-        extraRate = Number(slagItem.product_rate) || 0;
-        extraLabel = 'Slag';
+      // Slag is only part of the grain rate when the grains were actually crushed from it;
+      // without a crushing cost the base rate is just the purchase rate, so don't add slag.
+      if (crushingRate != null && crushingRate > 0) {
+        const slagItem = extraRateSiblingSource.find(
+          (i) => i.firm_name?.trim().toLowerCase() === firmKey && i.item_name?.trim().toLowerCase() === 'ferro chrome slag'
+        );
+        if (slagItem) {
+          extraRate = Number(slagItem.product_rate) || 0;
+          extraLabel = 'Slag';
+        }
       }
     } else if (['mc - 90 (0-1)', 'mc - 90 (1-3)', 'mc - 90 (3-5)', 'mc - 90 (3-8)', 'mc - 90 (5-8)'].includes(itemKey)) {
       // These grains are crushed from "MC - 90 Lumps" (crushing_actual), so baseProductRate
