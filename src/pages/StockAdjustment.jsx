@@ -758,7 +758,16 @@ const StockAdjustment = () => {
         return row.material_type === 'finish_good' ? 'Finish Good' : row.material_type === 'trading_material' ? 'Trading Material' : 'Raw Material';
       }
     },
-    { header: 'Qty', accessor: 'qty', render: (row) => Number(row.qty).toLocaleString('en-IN') },
+    {
+      header: 'Qty',
+      accessor: 'qty',
+      // Green when the entry adds stock (Factory +), red when it subtracts (Factory -).
+      render: (row) => (
+        <span className={`font-semibold ${row.status === 'Factory -' ? 'text-rose-500' : 'text-emerald-500'}`}>
+          {Number(row.qty).toLocaleString('en-IN')}
+        </span>
+      )
+    },
     { header: 'Remark', accessor: 'remark', render: (row) => row.remark || '-' },
     { header: 'Status', accessor: 'status', render: renderStatus },
     {

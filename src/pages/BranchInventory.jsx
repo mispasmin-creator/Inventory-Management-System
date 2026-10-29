@@ -915,7 +915,19 @@ const BranchInventory = () => {
         : '-'
     },
     { header: 'OP. Stock', accessor: 'op_stock', render: (row) => renderRawNumber(row.op_stock) },
-    { header: 'Stock Adjustment', accessor: 'stock_adjustment', render: (row) => renderRawNumber(row.stock_adjustment) },
+    {
+      header: 'Stock Adjustment',
+      accessor: 'stock_adjustment',
+      // Colour follows the NET of all Factory + / Factory - entries: green when stock is added overall,
+      // red when it is reduced overall, no tint when they cancel out (or there are none).
+      cellClassName: (row) => {
+        const net = Number(row.stock_adjustment || 0);
+        if (net > 0) return getTintedCellClass(net, 'emerald');
+        if (net < 0) return getTintedCellClass(net, 'rose');
+        return '';
+      },
+      render: (row) => renderRawNumber(row.stock_adjustment)
+    },
     {
       header: 'Purchase System',
       accessor: 'purchase_system',
