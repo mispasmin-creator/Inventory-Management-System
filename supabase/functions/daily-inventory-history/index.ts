@@ -31,6 +31,7 @@ const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
 const normalizeFirmKey = (value: unknown): string =>
   String(value || '')
     .toLowerCase()
+    .replace(/pmmpl\s*order/g, 'pmmpl')
     .replace(/pmmpl|madhya/g, 'pmmpl')
     .replace(/[^a-z0-9]/g, '');
 
@@ -417,14 +418,16 @@ const buildLiftDataMaps = async (selectedDate: string) => {
   const transportingRatesMap: Record<string, number> = {};
   const latestReceivingDateMap: Record<string, string> = {};
 
-  const liftRows = await fetchAll(
-    db().purchaseDb,
-    'LIFT-ACCOUNTS',
-    'id, "Firm Name", "Raw Material Name", "Actual Quantity", "Rate", "Transporter Rate", "Lifting Qty", '
-      + '"Total Bags Qty", "Type Of Transporting Rate", "Date Of Receiving", "Actual 1", '
-      + '"Unload Approval Status", "Unload Approval Required", "Planned 2", "Actual 2"',
-    (q) => q.not('Actual 1', 'is', null).not('Actual Quantity', 'is', null).order('Actual 1', { ascending: false }),
-  );
+  // LIFT-ACCOUNTS is summarised inside the purchase database (database/lift_inventory_summary.sql),
+  // exactly as externalSyncService.js does: only lab-tested rows count towards stock, dated by
+  // Date Of Test -> Actual 2 -> Date Of Receiving.
+  const { data: summary, error: summaryError } = await db().purchaseDb.rpc('lift_inventory_summary', {
+    p_start_date: selectedDate || '',
+    p_bag_item_keys: [...BAG_RATE_ITEM_KEYS],
+  });
+  if (summaryError) throw new Error(`lift_inventory_summary: ${summaryError.message}`);
+  const liftRows: Row[] = summary?.rate_rows || [];
+  const summaryQuantities: { key: string; item_key: string; quantities: unknown[] }[] = summary?.quantities || [];
 
   liftRows.forEach((row) => {
     if (isBlankValue(row['Actual 1']) || isBlankValue(row['Actual Quantity'])) return;
@@ -434,17 +437,7 @@ const buildLiftDataMaps = async (selectedDate: string) => {
     if (!firmKey || !itemKey) return;
 
     const key = `${firmKey}::${itemKey}`;
-    const rowDate = getLocalDateString(row['Date Of Receiving']);
-    const isInSelectedPeriod = !selectedDate || (rowDate && rowDate >= selectedDate);
-
-    // Quantity is only accumulated for the selected period, but the rate (below) always
-    // looks at the single most-recent receipt regardless of selectedDate — same as api.js.
-    const actualQuantity = Number(row['Actual Quantity']);
-    if (isInSelectedPeriod && Number.isFinite(actualQuantity)) {
-      // Light Diesel Oil is purchased in MT; converted to Ltr (x1000) like api.js.
-      actualQuantityMap[key] = (actualQuantityMap[key] || 0)
-        + (RATE_DIVIDE_BY_1000_ITEM_KEYS.has(itemKey) ? actualQuantity * 1000 : actualQuantity);
-    }
+    const rowDate = getLocalDateString(row['Date Of Test'] || row['Actual 2'] || row['Date Of Receiving']);
 
     // Product Rate: take the Rate from the LIFT-ACCOUNTS record with the latest Date Of
     // Receiving. For packaging bag items (BAG_RATE_ITEM_KEYS), the rate is instead computed
@@ -489,6 +482,17 @@ const buildLiftDataMaps = async (selectedDate: string) => {
         liftingQty !== 0
       ) ? roundTo(transporterRate / liftingQty, 2) : 0;
     }
+  });
+
+  // Same per-row conversion and left-to-right additions as externalSyncService.js.
+  summaryQuantities.forEach(({ key, item_key: itemKey, quantities }) => {
+    quantities.forEach((rawActualQuantity) => {
+      const actualQuantity = Number(rawActualQuantity);
+      if (!Number.isFinite(actualQuantity)) return;
+      // Light Diesel Oil is purchased in MT; converted to Ltr (x1000) like api.js.
+      actualQuantityMap[key] = (actualQuantityMap[key] || 0)
+        + (RATE_DIVIDE_BY_1000_ITEM_KEYS.has(itemKey) ? actualQuantity * 1000 : actualQuantity);
+    });
   });
 
   const [productionUsageMap, semi, crushing, productTabRateMap] = await Promise.all([
@@ -657,6 +661,48 @@ const buildFinishedGoodConsumptionMap = async (selectedDate: string) => {
       addToBucket(consumptionMap, `${firmKey}::${itemKey}`, qty, rowDate, selectedDate);
     }
   });
+
+  // Finished goods used as raw material inside a Semi Finished (SA-) entry are consumed too —
+  // mirrors api.js's buildFinishedGoodConsumptionMap.
+  const productionFirmCandidates = new Map<string, FirmCandidate[]>();
+  const semiProduction = await fetchAll(
+    db().productionDb,
+    'semi_production',
+    'id, "SF-Sr No.", "Name Of Semi Finished Good", "Firm name", "Timestamp"',
+  );
+  semiProduction.forEach((row) => addSemiProductionFirmCandidate(productionFirmCandidates, row));
+
+  const semiActual = await fetchAll(
+    db().productionDb,
+    'semi_actual',
+    '*',
+    (q) => q.order('id', { ascending: false }),
+  );
+  semiActual.forEach((row) => {
+    if (!String(row['S No.'] || '').startsWith('SA-')) return;
+
+    const outputQuantity = row['Qty Of Semi Finished Good'];
+    if (outputQuantity === null || outputQuantity === '' || !Number.isFinite(Number(outputQuantity))) return;
+
+    const entryFirm = isBlankValue(row.firm_name)
+      ? resolveSemiProductionFirm(
+        productionFirmCandidates,
+        `${row['Semi Finished Production No.']}::${normalizeItemKey(row['Product Name'])}`,
+        row.Timestamp,
+      )
+      : row.firm_name;
+    const firmKey = normalizeFirmKey(normalizeProductionFirmName(entryFirm));
+    if (!firmKey) return;
+
+    const rowDate = getLocalDateString(row['Date Of Production'] || row.Timestamp || row.created_at || row.date);
+    for (let i = 1; i <= 5; i += 1) {
+      const itemKey = normalizeItemKey(row[`Raw Material Name ${i}`]);
+      const raw = row[`Quantity Of Raw Material ${i}`];
+      const qty = Number(raw);
+      if (!itemKey || raw === null || raw === '' || !Number.isFinite(qty) || qty <= 0) continue;
+      addToBucket(consumptionMap, `${firmKey}::${itemKey}`, qty, rowDate, selectedDate);
+    }
+  });
   return consumptionMap;
 };
 
@@ -690,6 +736,19 @@ const buildFinishedGoodDispatchMap = async (selectedDate: string) => {
     if (orderId) orderMap.set(orderId, row);
   });
 
+  // A dispatch counts only once its SALE FORM 3 row is Approved (mirrors fetchApprovedSaleForm3Map).
+  const approvedSaleForm3 = new Map<string, string>();
+  const saleForm3 = await fetchAll(
+    db().orderDb,
+    'SALE FORM 3',
+    'dispatch_id, "Status", "Actual"',
+    (q) => q.eq('Status', 'Approved'),
+  );
+  saleForm3.forEach((row) => {
+    const dispatchId = String(row.dispatch_id ?? '').trim();
+    if (dispatchId) approvedSaleForm3.set(dispatchId, String(row.Actual || '').trim());
+  });
+
   const dispatches = await fetchAll(
     db().orderDb,
     'DISPATCH',
@@ -697,7 +756,10 @@ const buildFinishedGoodDispatchMap = async (selectedDate: string) => {
     (q) => q.not('Planned4', 'is', null).not('Actual4', 'is', null),
   );
   dispatches.forEach((row) => {
-    const invoiceActualizedAt = String(row['Bill Date'] || row.Actual4 || '').trim();
+    const approvedAt = approvedSaleForm3.get(normalizeJoinId(row.id));
+    if (approvedAt === undefined) return;
+
+    const invoiceActualizedAt = String(approvedAt || row['Bill Date'] || row.Actual4 || '').trim();
     if (!invoiceActualizedAt) return;
 
     const po = orderMap.get(normalizeJoinId(row.po_id)) || {};
@@ -724,10 +786,12 @@ const buildFinishedGoodPurchaseMap = async (selectedDate: string) => {
   const rows = await fetchAll(
     db().purchaseDb,
     'LIFT-ACCOUNTS',
-    'id, "Firm Name", "Raw Material Name", "Actual Quantity", "Date Of Receiving", "Timestamp"',
+    'id, "Firm Name", "Raw Material Name", "Actual Quantity", "Date Of Receiving", "Date Of Test", "Timestamp", "Actual 2", "Area lifting"',
     (q) => q.order('id', { ascending: false }),
   );
   rows.forEach((row) => {
+    // Only lab-tested receipts count (mirrors isLabTestRecorded in helpers.js).
+    if (isBlankValue(row['Actual 2']) && String(row['Area lifting'] || '').trim().toLowerCase() !== 'direct supply to party') return;
     const firmKey = normalizeFirmKey(row['Firm Name']);
     const productKey = normalizeItemKey(row['Raw Material Name']);
     const raw = row['Actual Quantity'];
@@ -737,7 +801,7 @@ const buildFinishedGoodPurchaseMap = async (selectedDate: string) => {
       purchaseMap,
       `${firmKey}::${productKey}`,
       qty,
-      getLocalDateString(row['Date Of Receiving'] || row['Timestamp']),
+      getLocalDateString(row['Date Of Test'] || row['Actual 2'] || row['Date Of Receiving'] || row['Timestamp']),
       selectedDate,
     );
   });
