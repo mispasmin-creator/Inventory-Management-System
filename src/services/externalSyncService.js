@@ -103,9 +103,35 @@ export const resolveSemiProductionFirm = (candidateMap, productionKey, entryTime
   return match.firm;
 };
 
-export const buildSemiFinishedActualLevelMap = async (selectedDate = '') => {
+export const fetchSemiProductionFirmCandidates = async () => {
   const pageSize = 1000;
   const productionFirmCandidates = new Map();
+
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await productionSupabase
+      .from('semi_production')
+      .select('id, "SF-Sr No.", "Name Of Semi Finished Good", "Firm name", "Timestamp"')
+      .range(from, from + pageSize - 1);
+
+    if (error) throw error;
+
+    (data || []).forEach((row) => addSemiProductionFirmCandidate(productionFirmCandidates, row));
+
+    if (!data || data.length < pageSize) break;
+  }
+
+  return productionFirmCandidates;
+};
+
+// semi_actual.firm_name (filled when the entry is created) wins; older rows fall back to matching by date.
+export const resolveSemiActualFirm = (row, productionFirmCandidates) => {
+  if (!isBlankValue(row.firm_name)) return row.firm_name;
+  const productionKey = `${row['Semi Finished Production No.']}::${normalizeItemKey(row['Product Name'])}`;
+  return resolveSemiProductionFirm(productionFirmCandidates, productionKey, row.Timestamp);
+};
+
+export const buildSemiFinishedActualLevelMap = async (selectedDate = '') => {
+  const pageSize = 1000;
   const semiAdjustmentMap = {};
   const semiGrainsMap = {};
   const semiFinesMap = {};
@@ -115,18 +141,7 @@ export const buildSemiFinishedActualLevelMap = async (selectedDate = '') => {
   const latestSemiComponentsMap = {};
 
   try {
-    for (let from = 0; ; from += pageSize) {
-      const { data, error } = await productionSupabase
-        .from('semi_production')
-        .select('id, "SF-Sr No.", "Name Of Semi Finished Good", "Firm name", "Timestamp"')
-        .range(from, from + pageSize - 1);
-
-      if (error) throw error;
-
-      (data || []).forEach((row) => addSemiProductionFirmCandidate(productionFirmCandidates, row));
-
-      if (!data || data.length < pageSize) break;
-    }
+    const productionFirmCandidates = await fetchSemiProductionFirmCandidates();
 
     for (let from = 0; ; from += pageSize) {
       const { data, error } = await productionSupabase
@@ -146,11 +161,7 @@ export const buildSemiFinishedActualLevelMap = async (selectedDate = '') => {
 
         const productName = row['Product Name'];
         const productKey = normalizeItemKey(productName);
-        const productionKey = `${row['Semi Finished Production No.']}::${productKey}`;
-        // semi_actual.firm_name (filled when the entry is created) wins; older rows fall back to matching by date.
-        const entryFirm = isBlankValue(row.firm_name)
-          ? resolveSemiProductionFirm(productionFirmCandidates, productionKey, row.Timestamp)
-          : row.firm_name;
+        const entryFirm = resolveSemiActualFirm(row, productionFirmCandidates);
         const firmKey = normalizeFirmKey(normalizeProductionFirmName(entryFirm));
         const rawQuantity = row['Qty Of Semi Finished Good'];
         const quantity = Number(rawQuantity);
@@ -194,6 +205,8 @@ export const buildSemiFinishedActualLevelMap = async (selectedDate = '') => {
           }
           if (components.length > 0) {
             latestSemiComponentsMap[key].components = components;
+            // Qty made in this same production run — the divisor for the derived per-unit rate
+            latestSemiComponentsMap[key].qtyMade = quantity;
           }
         }
 
@@ -218,6 +231,59 @@ export const buildSemiFinishedActualLevelMap = async (selectedDate = '') => {
   }
 
   return { semiAdjustmentMap, semiGrainsMap, semiFinesMap, semiGreenMap, semiClinkerMap, semiRawConsumptionMap, latestSemiComponentsMap };
+};
+
+// Per-unit costing of items made in the production system: for every firm + product, the
+// latest tallied actual_production row (newest "TallyActual", tie-break higher id) gives
+// "Costing Amount" / "Quantity Of FG". Used as the rate of produced items (e.g. LC - 60 AR)
+// when they are consumed as a component of a semi finished product.
+export const buildProductionTallyRateMap = async () => {
+  const pageSize = 1000;
+  const latestByKey = {};
+
+  try {
+    for (let from = 0; ; from += pageSize) {
+      const { data, error } = await productionSupabase
+        .from('actual_production')
+        .select('id, "FIRM Name", "Product Name", "Quantity Of FG", "Costing Amount", "TallyActual"')
+        .not('TallyActual', 'is', null)
+        .order('id', { ascending: false })
+        .range(from, from + pageSize - 1);
+
+      if (error) throw error;
+
+      (data || []).forEach((row) => {
+        const tallyText = String(row.TallyActual ?? '').trim();
+        if (!tallyText || tallyText === 'N/A' || tallyText === '-') return;
+
+        const firmKey = normalizeFirmKey(normalizeProductionFirmName(row['FIRM Name']));
+        const itemKey = normalizeItemKey(row['Product Name']);
+        if (!firmKey || !itemKey) return;
+
+        // Costing Amount is already the rate for 1 MT of the product (not divided by Quantity Of FG).
+        const costingAmount = Number(row['Costing Amount']);
+        if (!Number.isFinite(costingAmount) || costingAmount <= 0) return;
+
+        const time = toTimeValue(row.TallyActual) ?? -Infinity;
+        const id = Number(row.id) || 0;
+        const key = `${firmKey}::${itemKey}`;
+        const current = latestByKey[key];
+        if (!current || time > current.time || (time === current.time && id > current.id)) {
+          latestByKey[key] = { time, id, rate: costingAmount };
+        }
+      });
+
+      if (!data || data.length < pageSize) break;
+    }
+  } catch (error) {
+    console.warn('Supabase production tally rate sync failed:', error.message);
+  }
+
+  const tallyRateMap = {};
+  Object.entries(latestByKey).forEach(([key, value]) => {
+    tallyRateMap[key] = roundTo(value.rate, 2);
+  });
+  return tallyRateMap;
 };
 
 export const buildCrushingActualLevelMap = async (selectedDate = '') => {
@@ -441,6 +507,56 @@ export const buildFinishedGoodConsumptionMap = async (selectedDate = '') => {
     }
   } catch (error) {
     console.warn('Supabase finished good consumption map build failed:', error.message);
+  }
+
+  // Finished goods used as raw material inside a Semi Finished (SA-) entry are consumed too.
+  try {
+    const productionFirmCandidates = await fetchSemiProductionFirmCandidates();
+
+    for (let from = 0; ; from += pageSize) {
+      const { data, error } = await productionSupabase
+        .from('semi_actual')
+        .select('*')
+        .order('id', { ascending: false })
+        .range(from, from + pageSize - 1);
+
+      if (error) throw error;
+
+      (data || []).forEach((row) => {
+        if (!String(row['S No.'] || '').startsWith('SA-')) return;
+
+        const outputQuantity = row['Qty Of Semi Finished Good'];
+        if (outputQuantity === null || outputQuantity === '' || !Number.isFinite(Number(outputQuantity))) return;
+
+        const firmKey = normalizeFirmKey(normalizeProductionFirmName(resolveSemiActualFirm(row, productionFirmCandidates)));
+        if (!firmKey) return;
+
+        const rowDate = getLocalDateString(row['Date Of Production'] || row.Timestamp || row.created_at || row.date);
+
+        for (let i = 1; i <= 5; i += 1) {
+          const itemKey = normalizeItemKey(row[`Raw Material Name ${i}`]);
+          const rawQuantity = row[`Quantity Of Raw Material ${i}`];
+          const quantity = Number(rawQuantity);
+          if (!itemKey || rawQuantity === null || rawQuantity === '' || !Number.isFinite(quantity) || quantity <= 0) continue;
+
+          const key = `${firmKey}::${itemKey}`;
+          if (!consumptionMap[key]) {
+            consumptionMap[key] = { before: 0, after: 0, total: 0 };
+          }
+
+          consumptionMap[key].total += quantity;
+          if (selectedDate && rowDate && rowDate >= selectedDate) {
+            consumptionMap[key].after += quantity;
+          } else {
+            consumptionMap[key].before += quantity;
+          }
+        }
+      });
+
+      if (!data || data.length < pageSize) break;
+    }
+  } catch (error) {
+    console.warn('Supabase finished good semi finished consumption sync failed:', error.message);
   }
 
   return consumptionMap;

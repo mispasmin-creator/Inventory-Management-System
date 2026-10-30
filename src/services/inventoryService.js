@@ -13,6 +13,7 @@ import {
   getLocalDateString,
   isLabTestRecorded,
   hasActualLevel,
+  isNoRateItem,
   mergeDuplicateInventoryRows,
   normalizeFirmKey,
   normalizeItemKey,
@@ -32,7 +33,10 @@ import {
   buildFinishedGoodReturnMap,
   buildLiftDataMaps,
   buildProductTabRateMap,
-  fetchApprovedSaleForm3Map
+  buildProductionTallyRateMap,
+  fetchApprovedSaleForm3Map,
+  fetchSemiProductionFirmCandidates,
+  resolveSemiActualFirm
 } from './externalSyncService';
 
 export const inventoryService = {
@@ -87,12 +91,14 @@ export const inventoryService = {
           crushingOutputsMap
         },
         productTabRateMap,
+        productionTallyRateMap,
         salesRawOrdersResult,
         purchaseReturnMap
       ] = await Promise.all([
         query,
         buildLiftDataMaps(selectedDate),
         buildProductTabRateMap(),
+        buildProductionTallyRateMap(),
         salesRawSupabase
           .from('orders')
           .select('*')
@@ -128,6 +134,7 @@ export const inventoryService = {
 
       // Compute derived product rates for semi-finished items (e.g. P-14 Green, P14 Clinker, etc.)
       const derivedSemiRatesMap = {};
+      const semiRatesWithProcessing = new Set();
       if (latestSemiComponentsMap && Object.keys(latestSemiComponentsMap).length > 0) {
         for (let pass = 0; pass < 3; pass++) {
           let changed = false;
@@ -141,6 +148,7 @@ export const inventoryService = {
             let solidQty = 0;
             let totalQty = 0;
             let hasValidComponentRate = false;
+            let usedTallyRate = false;
 
             components.forEach((comp) => {
               const rmKey = comp.rmKey;
@@ -154,8 +162,16 @@ export const inventoryService = {
                     ? productTabRateMap[rmFullKey]
                     : (derivedSemiRatesMap[rmFullKey] !== undefined ? derivedSemiRatesMap[rmFullKey] : 0)));
 
+              // RKL only: component made in the production system (e.g. LC - 60 AR) with no purchase
+              // rate uses its latest Tally costing, which is a per-MT rate (Costing Amount / Quantity Of FG).
+              if (firmKey === 'rkl' && !(Number(rmRate) > 0) && productionTallyRateMap[rmFullKey] > 0) {
+                // Processing cost is added to the material price first, then multiplied by qty used.
+                rmRate = productionTallyRateMap[rmFullKey] + processingCost;
+                usedTallyRate = true;
+              }
+
               // If component is a semi-finished product, include its processing cost in its rate for cost multiplication
-              if (derivedSemiRatesMap[rmFullKey] !== undefined) {
+              if (derivedSemiRatesMap[rmFullKey] !== undefined && !semiRatesWithProcessing.has(rmFullKey)) {
                 const compProcCost = latestSemiComponentsMap[rmFullKey]?.processingCost || 0;
                 rmRate = Number(rmRate || 0) + compProcCost;
               }
@@ -173,9 +189,15 @@ export const inventoryService = {
               totalQty += comp.qty;
             });
 
-            const divisorQty = solidQty > 0 ? solidQty : totalQty;
+            // Tally-priced components (RKL): rate = ((Tally rate per MT + processing cost) x MT used)
+            // / qty actually made in the latest semi finished entry. The processing cost is already
+            // inside this rate, so the Product Rate column must not add it again.
+            const qtyMade = Number(data?.qtyMade) || 0;
+            const useTallyFormula = usedTallyRate && qtyMade > 0;
+            const divisorQty = useTallyFormula ? qtyMade : (solidQty > 0 ? solidQty : totalQty);
             if (hasValidComponentRate && divisorQty > 0) {
               const calcRate = roundTo(totalCost / divisorQty, 2);
+              if (useTallyFormula) semiRatesWithProcessing.add(key);
               if (derivedSemiRatesMap[key] !== calcRate) {
                 derivedSemiRatesMap[key] = calcRate;
                 changed = true;
@@ -199,11 +221,15 @@ export const inventoryService = {
 
           // True only when the rate genuinely comes from a purchase/manual source (LIFT-ACCOUNTS
           // PO or the Product Rate tab), not from the production-component derivation below.
-          const isPurchaseSourcedRate = useProductionRateFirst
+          const isPurchaseSourcedRate = useProductionRateFirst || isNoRateItem(item.item_name)
             ? false
             : (poRatesMap[key] !== undefined || productTabRateMap[key] !== undefined);
 
-          const baseRate = useProductionRateFirst
+          // In-house items (e.g. Insulation Pad Green) never show a price.
+          const noRate = isNoRateItem(item.item_name);
+          const baseRate = noRate
+            ? ''
+            : useProductionRateFirst
             ? derivedSemiRate
             : (poRatesMap[key] !== undefined
               ? poRatesMap[key]
@@ -212,7 +238,7 @@ export const inventoryService = {
                 : (derivedSemiRate !== undefined
                   ? derivedSemiRate
                   : (item.product_rate ?? ''))));
-          const transRate = transportingRatesMap[key] || 0;
+          const transRate = noRate ? 0 : (transportingRatesMap[key] || 0);
           let rate = baseRate;
           if (rate !== '') {
             rate = Number(rate) + transRate;
@@ -266,6 +292,7 @@ export const inventoryService = {
             raw_material_sales: -salesRawQty,
             actual_level: actualLevel,
             product_rate: rate,
+            semi_cost_included: semiRatesWithProcessing.has(key) && derivedSemiRate !== undefined && baseRate === derivedSemiRate,
             material_rate: baseRate,
             is_purchase_rate: isPurchaseSourcedRate,
             transportation_rate: transportingRatesMap[key] !== undefined ? transportingRatesMap[key] : 0,
@@ -480,6 +507,86 @@ export const inventoryService = {
           if (normalizeItemKey(row[`Finished Goods Name ${i}`]) !== productKey) continue;
           if (fgQtyRaw === null || fgQtyRaw === '' || !Number.isFinite(fgQty)) continue;
           entries.push({ source: 'Crushing', reference: `#${row.id}`, date: rowDate, quantity: fgQty });
+        }
+      });
+
+      if (!data || data.length < pageSize) break;
+    }
+
+    entries.sort((a, b) => String(b.date).localeCompare(String(a.date)));
+    return { entries, total: entries.reduce((sum, entry) => sum + entry.quantity, 0) };
+  },
+
+  // Source records behind a Finished Good row's "Consumption" figure
+  // (Actual Production raw materials + Semi Finished entry raw materials)
+  getFinishedGoodConsumptionBreakdown: async (firmName, productName, selectedDate = '') => {
+    const pageSize = 1000;
+    const firmKey = normalizeFirmKey(firmName);
+    const productKey = normalizeItemKey(productName);
+    const entries = [];
+    const isCounted = (rowDate) => !selectedDate || (rowDate && rowDate >= selectedDate);
+
+    const rawMaterialColumns = Array.from({ length: 20 }, (_, index) => `"Raw Material Name ${index + 1}", "Quantity Of Raw Material ${index + 1}"`).join(', ');
+
+    for (let from = 0; ; from += pageSize) {
+      const { data, error } = await productionSupabase
+        .from('actual_production')
+        .select(`id, "Timestamp", "Date Of Production", "FIRM Name", "Job Card No.", ${rawMaterialColumns}`)
+        .order('id', { ascending: false })
+        .range(from, from + pageSize - 1);
+      if (error) throw error;
+
+      (data || []).forEach((row) => {
+        if (normalizeFirmKey(normalizeProductionFirmName(row['FIRM Name'])) !== firmKey) return;
+        const rowDate = getLocalDateString(row['Date Of Production'] || row.Timestamp);
+        if (!isCounted(rowDate)) return;
+
+        for (let i = 1; i <= 20; i++) {
+          if (normalizeItemKey(row[`Raw Material Name ${i}`]) !== productKey) continue;
+          const rawQuantity = row[`Quantity Of Raw Material ${i}`];
+          const quantity = Number(rawQuantity);
+          if (rawQuantity === null || rawQuantity === '' || !Number.isFinite(quantity)) continue;
+          entries.push({
+            source: 'Actual Production',
+            reference: row['Job Card No.'] || `#${row.id}`,
+            date: rowDate,
+            quantity
+          });
+        }
+      });
+
+      if (!data || data.length < pageSize) break;
+    }
+
+    const productionFirmCandidates = await fetchSemiProductionFirmCandidates();
+    for (let from = 0; ; from += pageSize) {
+      const { data, error } = await productionSupabase
+        .from('semi_actual')
+        .select('*')
+        .order('id', { ascending: false })
+        .range(from, from + pageSize - 1);
+      if (error) throw error;
+
+      (data || []).forEach((row) => {
+        if (!String(row['S No.'] || '').startsWith('SA-')) return;
+        const outputQuantity = row['Qty Of Semi Finished Good'];
+        if (outputQuantity === null || outputQuantity === '' || !Number.isFinite(Number(outputQuantity))) return;
+        if (normalizeFirmKey(normalizeProductionFirmName(resolveSemiActualFirm(row, productionFirmCandidates))) !== firmKey) return;
+
+        const rowDate = getLocalDateString(row['Date Of Production'] || row.Timestamp || row.created_at || row.date);
+        if (!isCounted(rowDate)) return;
+
+        for (let i = 1; i <= 5; i++) {
+          if (normalizeItemKey(row[`Raw Material Name ${i}`]) !== productKey) continue;
+          const rawQuantity = row[`Quantity Of Raw Material ${i}`];
+          const quantity = Number(rawQuantity);
+          if (rawQuantity === null || rawQuantity === '' || !Number.isFinite(quantity) || quantity <= 0) continue;
+          entries.push({
+            source: 'Semi Finished',
+            reference: [row['S No.'], row['Product Name']].filter(Boolean).join(' · ') || `#${row.id}`,
+            date: rowDate,
+            quantity
+          });
         }
       });
 

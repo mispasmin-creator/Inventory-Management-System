@@ -5,7 +5,7 @@ import { useInventory } from '../hooks/useInventory';
 import { apiService } from '../services/api';
 import { purchaseSupabase, supabase, productionSupabase } from '../services/supabaseClient';
 import { buildRawMaterialPipelineMap } from '../services/externalSyncService';
-import { normalizeFirmKey, normalizeItemKey } from '../services/helpers';
+import { isNoRateItem, normalizeFirmKey, normalizeItemKey } from '../services/helpers';
 import Table from '../components/Table';
 import Modal from '../components/Modal';
 import GlassCard from '../components/GlassCard';
@@ -165,13 +165,16 @@ const computeProcessedRawMaterialItem = (item, {
 
   // Crushing actual processing cost: match firm + item name strictly to finished goods in crushing_actual
   const crushingRate = (() => {
-    if (!firmKey || !itemKey) return null;
+    if (!firmKey || !itemKey || isNoRateItem(item.item_name)) return null;
     const directKey = `${firmKey}::${itemKey}`;
     return crushingCostMap[directKey] != null ? crushingCostMap[directKey] : null;
   })();
 
   // Semi processing actual cost
   const semiProcessingCost = (() => {
+    // Rate already built with processing cost inside (RKL Tally formula) — don't add it again
+    if (item.semi_cost_included) return null;
+    if (isNoRateItem(item.item_name)) return null;
     if (!firmKey || !itemKey) return null;
     const directKey = `${firmKey}::${itemKey}`;
     return semiProcessingCostMap[directKey] != null ? semiProcessingCostMap[directKey] : null;
@@ -776,7 +779,8 @@ const BranchInventory = () => {
       const fetcher = {
         production: apiService.getFinishedGoodProductionBreakdown,
         purchase: apiService.getFinishedGoodPurchaseBreakdown,
-        sales: apiService.getFinishedGoodSalesBreakdown
+        sales: apiService.getFinishedGoodSalesBreakdown,
+        consumption: apiService.getFinishedGoodConsumptionBreakdown
       }[kind];
       const { entries, total } = await fetcher(row.firm_name, row.product_name, selectedDate);
       setFgBreakdown({ kind, item: row, loading: false, entries, total });
@@ -837,7 +841,7 @@ const BranchInventory = () => {
       header: 'Consumption', 
       accessor: 'consumption', 
       cellClassName: (row) => getTintedCellClass(row.consumption, 'rose'),
-      render: (row) => renderFinishGoodNumber(row.consumption)
+      render: (row) => renderFgBreakdownCell('consumption', row, row.consumption)
     },
     { 
       header: 'Current Level', 
@@ -990,6 +994,7 @@ const BranchInventory = () => {
       header: 'Product Rate',
       accessor: 'product_rate',
       render: (row) => {
+        if (isNoRateItem(row.item_name)) return '-';
         // Crushing actual rate has first priority; fall back to stored product_rate + semi_processing_cost
         const hasCrushingRate = row.crushing_product_rate != null && row.crushing_product_rate > 0;
         const hasSemiCost = row.semi_processing_cost != null && row.semi_processing_cost > 0;
@@ -2209,7 +2214,7 @@ const BranchInventory = () => {
       <Modal
         isOpen={!!fgBreakdown}
         onClose={() => setFgBreakdown(null)}
-        title={`${{ production: 'Production', purchase: 'Purchase Material Received', sales: 'Sales' }[fgBreakdown?.kind] || ''}: ${fgBreakdown?.item?.product_name || ''}`}
+        title={`${{ production: 'Production', purchase: 'Purchase Material Received', sales: 'Sales', consumption: 'Consumption' }[fgBreakdown?.kind] || ''}: ${fgBreakdown?.item?.product_name || ''}`}
       >
         <div className="space-y-4 text-slate-300">
           <div className="flex items-center justify-between gap-4 px-4 py-3 rounded-xl bg-slate-900/60 border border-slate-800 backdrop-blur-md">
@@ -2236,7 +2241,7 @@ const BranchInventory = () => {
                   <tr>
                     <th className="px-4 py-2.5 font-semibold text-slate-400">Date</th>
                     <th className="px-4 py-2.5 font-semibold text-slate-400">Source</th>
-                    <th className="px-4 py-2.5 font-semibold text-slate-400">{{ production: 'Job Card', purchase: 'Lift No', sales: 'DO No. / Party' }[fgBreakdown?.kind]}</th>
+                    <th className="px-4 py-2.5 font-semibold text-slate-400">{{ production: 'Job Card', purchase: 'Lift No', sales: 'DO No. / Party', consumption: 'Job Card / Semi Finished' }[fgBreakdown?.kind]}</th>
                     <th className="px-4 py-2.5 font-semibold text-emerald-400">Quantity</th>
                   </tr>
                 </thead>
@@ -2265,7 +2270,7 @@ const BranchInventory = () => {
           {!fgBreakdown?.loading && (
             <div className="flex items-center justify-between px-5 py-3.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-md">
               <div className="text-xs font-bold uppercase tracking-wider">
-                Total {{ production: 'Production', purchase: 'Purchase Received', sales: 'Sales' }[fgBreakdown?.kind]}
+                Total {{ production: 'Production', purchase: 'Purchase Received', sales: 'Sales', consumption: 'Consumption' }[fgBreakdown?.kind]}
                 <span className="ml-2 font-medium normal-case opacity-90">({(fgBreakdown?.entries || []).length} entries)</span>
               </div>
               <div className="text-xl font-black tracking-wide">

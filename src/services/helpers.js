@@ -181,6 +181,18 @@ export const RATE_DIVIDE_BY_1000_ITEM_KEYS = new Set([
   'Light Diesel Oil'
 ].map(normalizeItemKey));
 
+// Made in-house, so they have no purchase/production price to show.
+export const NO_RATE_ITEM_KEYS = new Set([
+  'Insulation Pad 200X200X75 Green',
+  'Insulation Pad 200X200X50 Green',
+  'Insulation Pad 250X250X75',
+  'Insulation Pad 250X250X50',
+  'Insulation Pad 250X250X75 Green',
+  'Insulation Pad 250X250X50 Green'
+].map(normalizeItemKey));
+
+export const isNoRateItem = (name) => NO_RATE_ITEM_KEYS.has(normalizeItemKey(name));
+
 // Same "Unload Approval" completion filter used for the packaging bag rate calculation.
 export const isUnloadApprovalComplete = (row) => {
   const status = row['Unload Approval Status'];
